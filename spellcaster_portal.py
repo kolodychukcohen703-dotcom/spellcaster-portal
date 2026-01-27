@@ -14,7 +14,7 @@ Features:
 """
 
 from __future__ import annotations
-import os, re, sqlite3, unicodedata
+import os, re, sqlite3, unicodedata, zipfile, shutil, tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -379,74 +379,6 @@ def index_library(use_cleaner: bool = DEFAULT_USE_CLEANER) -> Dict[str, int]:
         "files_scanned": file_count,
     }
 
-
-import zipfile
-import shutil
-import time
-from pathlib import Path
-
-ALLOWED_BOOK_EXTS = {".pdf", ".txt", ".md", ".rtf", ".epub"}
-MAX_ZIP_UPLOAD_BYTES = 250 * 1024 * 1024
-MAX_ZIP_EXTRACT_BYTES = 800 * 1024 * 1024
-MAX_ZIP_FILES = 5000
-
-def _safe_filename(name: str) -> str:
-    cleaned = []
-    for ch in name:
-        if ch.isalnum() or ch in ("_", "-", "."):
-            cleaned.append(ch)
-        else:
-            cleaned.append("_")
-    return "".join(cleaned).strip("._") or "upload"
-
-def _is_safe_zip_member(member_name: str) -> bool:
-    p = Path(member_name)
-    if member_name.startswith(("/", "\\")):
-        return False
-    if ".." in p.parts:
-        return False
-    return True
-
-def extract_zip_books(zip_path: Path, dest_dir: Path) -> dict:
-    extracted = 0
-    skipped = 0
-    bytes_written = 0
-    dest_dir.mkdir(parents=True, exist_ok=True)
-
-    with zipfile.ZipFile(zip_path) as zf:
-        infos = zf.infolist()
-        if len(infos) > MAX_ZIP_FILES:
-            raise ValueError("ZIP has too many files.")
-
-        for info in infos:
-            name = info.filename
-            if name.endswith("/") or name.endswith("\\"):
-                continue
-            if not _is_safe_zip_member(name):
-                skipped += 1
-                continue
-            ext = Path(name).suffix.lower()
-            if ext not in ALLOWED_BOOK_EXTS:
-                skipped += 1
-                continue
-            if info.file_size <= 0:
-                skipped += 1
-                continue
-            if bytes_written + info.file_size > MAX_ZIP_EXTRACT_BYTES:
-                raise ValueError("ZIP extraction exceeded size limit.")
-
-            flat = _safe_filename(Path(name).name)
-            out = dest_dir / flat
-            if out.exists():
-                out = dest_dir / f"{out.stem}_{int(time.time())}{out.suffix}"
-
-            with zf.open(info) as src, open(out, "wb") as dst:
-                shutil.copyfileobj(src, dst)
-
-            bytes_written += info.file_size
-            extracted += 1
-
-    return {"extracted": extracted, "skipped": skipped, "bytes_written": bytes_written}
 # ---- Helpers --------------------------------------------------------------
 
 def rel_to_abs(rel_path: str) -> Path:
@@ -2290,37 +2222,185 @@ if __name__ == "__main__":
 @app.route("/upload", methods=["GET", "POST"])
 @login_required
 def upload():
-    """Upload PDFs/TXT/MD into the library folder (stored under DATA_DIR)."""
+    """
+    Upload books into the library folder (stored under DATA_DIR).
+
+    Supports:
+      - Multiple .pdf/.txt/.md files in one request
+      - .zip archives containing those files (safely extracted)
+    """
     message = None
+
+    allowed_docs = {".pdf", ".txt", ".md"}
+    allowed_all  = allowed_docs | {".zip"}
+
+    def sanitize_filename(name: str, fallback_ext: str = "") -> str:
+        name = os.path.basename(name or "").strip()
+        if not name:
+            return f"upload_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}{fallback_ext}"
+        # keep simple, cross-platform safe
+        name = re.sub(r"[^a-zA-Z0-9._ -]+", "_", name).strip()
+        name = name.replace("..", ".")
+        if not name:
+            return f"upload_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}{fallback_ext}"
+        return name
+
+    def unique_path(dest: Path) -> Path:
+        if not dest.exists():
+            return dest
+        stem, ext = dest.stem, dest.suffix
+        for i in range(1, 10_000):
+            cand = dest.with_name(f"{stem}_{i}{ext}")
+            if not cand.exists():
+                return cand
+        # worst case
+        return dest.with_name(f"{stem}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}{ext}")
+
+    def safe_extract_zip(zip_path: Path, out_dir: Path) -> Dict[str, int]:
+        """
+        Extract allowed files from zip into out_dir safely:
+          - blocks absolute paths and .. traversal
+          - blocks backslash traversal
+          - enforces basic limits to reduce zip-bomb risk
+        """
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        extracted = 0
+        skipped = 0
+
+        max_files = int(os.getenv("ZIP_MAX_FILES", "5000"))
+        max_total_uncompressed = int(os.getenv("ZIP_MAX_UNCOMPRESSED_MB", "400")) * 1024 * 1024
+
+        total_uncompressed = 0
+        file_seen = 0
+
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            infos = zf.infolist()
+            for info in infos:
+                file_seen += 1
+                if file_seen > max_files:
+                    skipped += 1
+                    continue
+
+                # Normalize: zip spec uses forward slashes, but be defensive about backslashes
+                name = (info.filename or "").replace("\\", "/")
+
+                # skip directories
+                if name.endswith("/"):
+                    continue
+
+                # absolute path or traversal?
+                if name.startswith("/") or name.startswith("\\"):
+                    skipped += 1
+                    continue
+                parts = [p for p in name.split("/") if p not in ("", ".",)]
+                if any(p == ".." for p in parts):
+                    skipped += 1
+                    continue
+
+                ext = Path(parts[-1]).suffix.lower()
+                if ext not in allowed_docs:
+                    skipped += 1
+                    continue
+
+                # zip bomb guard
+                total_uncompressed += int(getattr(info, "file_size", 0) or 0)
+                if total_uncompressed > max_total_uncompressed:
+                    skipped += 1
+                    continue
+
+                # sanitize each path part
+                safe_parts = [re.sub(r"[^a-zA-Z0-9._ -]+", "_", p).strip().replace("..", ".") for p in parts]
+                safe_parts = [p for p in safe_parts if p]
+                if not safe_parts:
+                    skipped += 1
+                    continue
+
+                rel = Path(*safe_parts)
+                dest = (out_dir / rel).resolve()
+                try:
+                    dest.relative_to(out_dir.resolve())
+                except Exception:
+                    skipped += 1
+                    continue
+
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest = unique_path(dest)
+
+                with zf.open(info, "r") as src_f, open(dest, "wb") as out_f:
+                    shutil.copyfileobj(src_f, out_f)
+
+                extracted += 1
+
+        return {"extracted": extracted, "skipped": skipped}
+
     if request.method == "POST":
-        f = request.files.get("file")
-        if not f or not f.filename:
-            message = "No file selected."
-        else:
-            name = os.path.basename(f.filename)
-            # basic extension allow-list
-            ext = Path(name).suffix.lower()
-            allowed = {".pdf", ".txt", ".md"}
-            if ext not in allowed:
-                message = "Unsupported file type. Allowed: PDF, TXT, MD."
+        # Support multi-file name="files" and fallback to legacy name="file"
+        files = request.files.getlist("files")
+        if not files:
+            legacy = request.files.get("file")
+            if legacy:
+                files = [legacy]
+
+        if not files or all((not f or not f.filename) for f in files):
+            message = "No files selected."
+            return render_template("upload.html", message=message)
+
+        uploads_saved = 0
+        zips_saved = 0
+        zip_extracted = 0
+        zip_skipped = 0
+
+        # Where we store zip contents
+        imports_root = LIB_DIR / "imports"
+        imports_root.mkdir(parents=True, exist_ok=True)
+
+        for f in files:
+            if not f or not f.filename:
+                continue
+
+            original_name = sanitize_filename(f.filename)
+            ext = Path(original_name).suffix.lower()
+            if ext not in allowed_all:
+                message = f"Unsupported file type: {original_name}\nAllowed: PDF, TXT, MD, ZIP."
+                continue
+
+            if ext == ".zip":
+                # Save zip in a subfolder
+                stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+                zip_base = sanitize_filename(Path(original_name).stem, "")
+                zip_store_dir = imports_root / "_zips"
+                zip_store_dir.mkdir(parents=True, exist_ok=True)
+                zip_dest = unique_path(zip_store_dir / f"{zip_base}_{stamp}.zip")
+                f.save(zip_dest)
+                zips_saved += 1
+
+                # Extract under imports/<zip_base>_<stamp>/
+                out_dir = imports_root / f"{zip_base}_{stamp}"
+                stats = safe_extract_zip(zip_dest, out_dir)
+                zip_extracted += stats["extracted"]
+                zip_skipped += stats["skipped"]
             else:
-                # sanitize filename
-                safe = re.sub(r"[^a-zA-Z0-9._ -]+", "_", name).strip().replace("..", ".")
-                if not safe:
-                    safe = f"upload_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}{ext}"
-                dest = LIB_DIR / safe
-                # avoid overwrite by adding suffix
-                if dest.exists():
-                    stem = dest.stem
-                    for i in range(1, 1000):
-                        candidate = LIB_DIR / f"{stem}_{i}{ext}"
-                        if not candidate.exists():
-                            dest = candidate
-                            break
+                # Save into LIB_DIR root (flat) by default
+                safe_name = sanitize_filename(original_name, ext)
+                dest = unique_path(LIB_DIR / safe_name)
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 f.save(dest)
-                # Reindex after upload
-                summary = index_library(use_cleaner=DEFAULT_USE_CLEANER)
-                message = f"Uploaded to {dest.name}. Reindex complete: +{summary['inserted']} new, {summary['updated']} updated."
-    return render_template("upload.html", message=message)
+                uploads_saved += 1
 
+        # Reindex once at end
+        summary = index_library(use_cleaner=DEFAULT_USE_CLEANER)
+
+        message_lines = []
+        message_lines.append(f"Uploads saved: {uploads_saved} file(s)")
+        message_lines.append(f"ZIPs saved: {zips_saved} file(s)")
+        if zips_saved:
+            message_lines.append(f"ZIP extracted: {zip_extracted} file(s)")
+            if zip_skipped:
+                message_lines.append(f"ZIP skipped: {zip_skipped} item(s) (unsupported/path blocked/limits)")
+        message_lines.append(
+            f"Reindex complete: +{summary['inserted']} new, {summary['updated']} updated, -{summary['removed']} removed."
+        )
+        message = "\n".join(message_lines)
+
+    return render_template("upload.html", message=message)
