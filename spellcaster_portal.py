@@ -379,6 +379,67 @@ def index_library(use_cleaner: bool = DEFAULT_USE_CLEANER) -> Dict[str, int]:
         "files_scanned": file_count,
     }
 
+
+import zipfile
+import shutil
+import time
+
+ALLOWED_BOOK_EXTS = {".pdf", ".txt", ".md", ".rtf", ".epub"}
+MAX_ZIP_UPLOAD_BYTES = 250 * 1024 * 1024
+MAX_ZIP_EXTRACT_BYTES = 800 * 1024 * 1024
+MAX_ZIP_FILES = 5000
+
+def _safe_filename(name: str) -> str:
+    cleaned = []
+    for ch in name:
+        if ch.isalnum() or ch in ("_", "-", "."):
+            cleaned.append(ch)
+        else:
+            cleaned.append("_")
+    return "".join(cleaned).strip("._") or "upload"
+
+def _is_safe_zip_member(member_name: str) -> bool:
+    p = Path(member_name)
+    if member_name.startswith(("/", "\")):
+        return False
+    if ".." in p.parts:
+        return False
+    return True
+
+def extract_zip_books(zip_path: Path, dest_dir: Path) -> dict:
+    extracted = 0
+    skipped = 0
+    bytes_written = 0
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    with zipfile.ZipFile(zip_path) as zf:
+        infos = zf.infolist()
+        if len(infos) > MAX_ZIP_FILES:
+            raise ValueError("ZIP has too many files.")
+
+        for info in infos:
+            name = info.filename
+            if name.endswith("/") or name.endswith("\"):
+                continue
+            if not _is_safe_zip_member(name):
+                skipped += 1
+                continue
+            ext = Path(name).suffix.lower()
+            if ext not in ALLOWED_BOOK_EXTS:
+                skipped += 1
+                continue
+            if bytes_written + info.file_size > MAX_ZIP_EXTRACT_BYTES:
+                raise ValueError("ZIP extraction exceeded size limit.")
+            flat = _safe_filename(Path(name).name)
+            out = dest_dir / flat
+            if out.exists():
+                out = dest_dir / f"{out.stem}_{int(time.time())}{out.suffix}"
+            with zf.open(info) as src, open(out, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            bytes_written += info.file_size
+            extracted += 1
+
+    return {"extracted": extracted, "skipped": skipped, "bytes_written": bytes_written}
 # ---- Helpers --------------------------------------------------------------
 
 def rel_to_abs(rel_path: str) -> Path:
