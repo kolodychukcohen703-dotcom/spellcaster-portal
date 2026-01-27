@@ -383,6 +383,7 @@ def index_library(use_cleaner: bool = DEFAULT_USE_CLEANER) -> Dict[str, int]:
 import zipfile
 import shutil
 import time
+from pathlib import Path
 
 ALLOWED_BOOK_EXTS = {".pdf", ".txt", ".md", ".rtf", ".epub"}
 MAX_ZIP_UPLOAD_BYTES = 250 * 1024 * 1024
@@ -419,7 +420,7 @@ def extract_zip_books(zip_path: Path, dest_dir: Path) -> dict:
 
         for info in infos:
             name = info.filename
-            if name.endswith("/") or name.endswith("\"):
+            if name.endswith("/") or name.endswith("\\"):
                 continue
             if not _is_safe_zip_member(name):
                 skipped += 1
@@ -428,14 +429,20 @@ def extract_zip_books(zip_path: Path, dest_dir: Path) -> dict:
             if ext not in ALLOWED_BOOK_EXTS:
                 skipped += 1
                 continue
+            if info.file_size <= 0:
+                skipped += 1
+                continue
             if bytes_written + info.file_size > MAX_ZIP_EXTRACT_BYTES:
                 raise ValueError("ZIP extraction exceeded size limit.")
+
             flat = _safe_filename(Path(name).name)
             out = dest_dir / flat
             if out.exists():
                 out = dest_dir / f"{out.stem}_{int(time.time())}{out.suffix}"
+
             with zf.open(info) as src, open(out, "wb") as dst:
                 shutil.copyfileobj(src, dst)
+
             bytes_written += info.file_size
             extracted += 1
 
