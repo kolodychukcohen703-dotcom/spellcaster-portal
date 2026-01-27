@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<article class="card">
+  <h3>Fantasy Console</h3>
+  <pre id="frame" class="muted" style="min-height:8em">Loading…</pre>
+  <button onclick="toggleAnim()" id="btn">Start Animation</button>
+</article>
+<script>
+let running=false, timer=null;
+async function tick(){
+  try{
+    const r = await fetch('/portal/fantasy/frame?t=' + Date.now()/1000);
+    const j = await r.json();
+    document.getElementById('frame').textContent = j.frame || '(empty)';
+  }catch(e){}
+}
+function toggleAnim(){
+  running = !running;
+  document.getElementById('btn').innerText = running ? 'Stop' : 'Start Animation';
+  if(running){ timer = setInterval(tick, 250); } else { clearInterval(timer); }
+}
+tick();
+</script>
+{% endblock %}

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<article class="card">
+  <h3>Audio Converter</h3>
+  <form id="audio-form" hx-post="/audio/synthesize" hx-target="#audio-result">
+    <textarea name="text" rows="6" placeholder="Paste text to synthesize…" required></textarea>
+    <button type="submit">Synthesize (Piper stub)</button>
+  </form>
+</article>
+<article class="card">
+  <h3>Result</h3>
+  <pre id="audio-result" class="muted">No output yet.</pre>
+</article>
+{% endblock %}

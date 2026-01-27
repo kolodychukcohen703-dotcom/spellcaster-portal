@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+  <h2>Upload a book</h2>
+  <p>Allowed: <strong>.pdf</strong>, <strong>.txt</strong>, <strong>.md</strong>. Uploaded files are stored in the Portal's data directory and then indexed for search.</p>
+
+  {% if message %}
+    <article>{{ message }}</article>
+  {% endif %}
+
+  <form method="post" enctype="multipart/form-data">
+    <label>
+      Select file
+      <input type="file" name="file" accept=".pdf,.txt,.md" required>
+    </label>
+    <button type="submit">Upload + Reindex</button>
+  </form>
+
+  <hr>
+  <p><a href="/home_hub">Back to Home Hub</a></p>
+{% endblock %}

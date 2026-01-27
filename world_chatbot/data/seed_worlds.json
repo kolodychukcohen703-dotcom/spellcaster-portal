@@ -1,0 +1,304 @@
+{
+  "worlds": [
+    {
+      "id": "W001",
+      "name": "Sanctuary-Lobby",
+      "biome": "forest",
+      "climate": "temperate",
+      "magic": "high",
+      "tech": "mid",
+      "governance": "council",
+      "economy": "craft + trade",
+      "danger": "low",
+      "mood": "welcoming",
+      "population": 1200,
+      "landmarks": [
+        "Lantern Gate",
+        "Whisper Station",
+        "Cedar Hall"
+      ],
+      "tags": [
+        "lobby",
+        "safe",
+        "family"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "W002",
+      "name": "Kathleen-Garden",
+      "biome": "orchard",
+      "climate": "mild",
+      "magic": "gentle",
+      "tech": "low",
+      "governance": "caretaker",
+      "economy": "herbalism",
+      "danger": "low",
+      "mood": "soft",
+      "population": 220,
+      "landmarks": [
+        "Butterfly Pergola",
+        "Sunlit Greenhouse",
+        "Stone Well"
+      ],
+      "tags": [
+        "garden",
+        "healing"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "W003",
+      "name": "Diane-Observatory",
+      "biome": "mountain",
+      "climate": "crisp",
+      "magic": "mystic",
+      "tech": "mid",
+      "governance": "archives",
+      "economy": "research",
+      "danger": "medium",
+      "mood": "quiet",
+      "population": 340,
+      "landmarks": [
+        "Star Dome",
+        "Glass Walkway",
+        "Archive Vault"
+      ],
+      "tags": [
+        "stars",
+        "study"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "W004",
+      "name": "Anthony-Forge",
+      "biome": "volcanic",
+      "climate": "hot",
+      "magic": "high",
+      "tech": "high",
+      "governance": "guild",
+      "economy": "metalwork",
+      "danger": "medium",
+      "mood": "driven",
+      "population": 800,
+      "landmarks": [
+        "Hammer Square",
+        "Cooling Canals",
+        "Ember Foundry"
+      ],
+      "tags": [
+        "forge",
+        "industry"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "W005",
+      "name": "Family-Hearth",
+      "biome": "village",
+      "climate": "four-seasons",
+      "magic": "low",
+      "tech": "low",
+      "governance": "elders",
+      "economy": "farming",
+      "danger": "low",
+      "mood": "cozy",
+      "population": 560,
+      "landmarks": [
+        "Hearth Plaza",
+        "Bread Oven",
+        "River Bridge"
+      ],
+      "tags": [
+        "home",
+        "food"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "W006",
+      "name": "Friend-Arcade",
+      "biome": "neon-city",
+      "climate": "night",
+      "magic": "spark",
+      "tech": "high",
+      "governance": "districts",
+      "economy": "games + music",
+      "danger": "low",
+      "mood": "electric",
+      "population": 1500,
+      "landmarks": [
+        "Arcade Row",
+        "Synth Market",
+        "Pixel Pier"
+      ],
+      "tags": [
+        "fun",
+        "city"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "W007",
+      "name": "Witness-Hall",
+      "biome": "cathedral",
+      "climate": "still",
+      "magic": "ritual",
+      "tech": "low",
+      "governance": "vows",
+      "economy": "offerings",
+      "danger": "low",
+      "mood": "solemn",
+      "population": 70,
+      "landmarks": [
+        "Bloodstone Floor",
+        "Oath Lanterns",
+        "Memory Alcoves"
+      ],
+      "tags": [
+        "witness",
+        "symbol"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "W008",
+      "name": "Ryoko-Homeforge",
+      "biome": "mansion-realms",
+      "climate": "variable",
+      "magic": "design",
+      "tech": "high",
+      "governance": "architects",
+      "economy": "build credits",
+      "danger": "low",
+      "mood": "creative",
+      "population": 420,
+      "landmarks": [
+        "Blueprint Atrium",
+        "Room Loom",
+        "Hallway Atelier"
+      ],
+      "tags": [
+        "builder",
+        "homes"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "W009",
+      "name": "Cohen-Starmap-Deck",
+      "biome": "sky-platform",
+      "climate": "clear",
+      "magic": "cosmic",
+      "tech": "mid",
+      "governance": "navigator",
+      "economy": "mapping",
+      "danger": "medium",
+      "mood": "awe",
+      "population": 130,
+      "landmarks": [
+        "Starmap Table",
+        "Signal Mast",
+        "North Window"
+      ],
+      "tags": [
+        "starmap",
+        "signal"
+      ],
+      "created_by": "system"
+    }
+  ],
+  "homes": [
+    {
+      "id": "H001",
+      "name": "Lantern Cabin",
+      "world_id": "W001",
+      "style": "cabin",
+      "size": "small",
+      "materials": "cedar + stone",
+      "defense": "warded",
+      "amenities": [
+        "fireplace",
+        "tea shelf",
+        "reading nook"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "H002",
+      "name": "Butterfly Cottage",
+      "world_id": "W002",
+      "style": "cottage",
+      "size": "small",
+      "materials": "whitewood",
+      "defense": "none",
+      "amenities": [
+        "garden bench",
+        "seed chest",
+        "sunroom"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "H003",
+      "name": "Star Deck Loft",
+      "world_id": "W003",
+      "style": "loft",
+      "size": "medium",
+      "materials": "glass + steel",
+      "defense": "alarm runes",
+      "amenities": [
+        "telescope dock",
+        "lab bench",
+        "quiet bed"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "H004",
+      "name": "Forge Dormitory",
+      "world_id": "W004",
+      "style": "barracks",
+      "size": "large",
+      "materials": "iron + basalt",
+      "defense": "guards",
+      "amenities": [
+        "tool wall",
+        "hot baths",
+        "training ring"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "H005",
+      "name": "Hearthhouse",
+      "world_id": "W005",
+      "style": "farmhouse",
+      "size": "medium",
+      "materials": "pine + clay",
+      "defense": "watch bell",
+      "amenities": [
+        "bread oven",
+        "family table",
+        "river porch"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "H006",
+      "name": "Arcade Studio",
+      "world_id": "W006",
+      "style": "studio",
+      "size": "small",
+      "materials": "concrete + neon glass",
+      "defense": "keypad",
+      "amenities": [
+        "music pad",
+        "retro console",
+        "mini fridge"
+      ],
+      "created_by": "system"
+    }
+  ]
+}

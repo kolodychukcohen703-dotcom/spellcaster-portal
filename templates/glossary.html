@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<article class="card">
+  <h3>Add Symbol</h3>
+  <form hx-post="/portal/glossary/api" hx-target="#glossary" hx-swap="afterbegin">
+    <div class="grid">
+      <input name="symbol" placeholder="Symbol (e.g., 🛡️)" required />
+      <input name="meaning" placeholder="Meaning" required />
+      <input name="frequency" type="number" value="0" min="0" />
+    </div>
+    <button type="submit">Add</button>
+  </form>
+</article>
+<article class="card">
+  <h3>Glossary</h3>
+  <div id="glossary" hx-get="/portal/glossary/list" hx-trigger="load"></div>
+</article>
+{% endblock %}

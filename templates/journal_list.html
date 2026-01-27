@@ -1,0 +1,8 @@
+{% for e in entries %}
+  <details open>
+    <summary><strong>{{ e.title }}</strong> — <small>{{ e.created_at }}</small> — <small>{{ e.tags }}</small></summary>
+    <pre>{{ e.body }}</pre>
+  </details>
+{% else %}
+  <p class="muted">No entries yet.</p>
+{% endfor %}

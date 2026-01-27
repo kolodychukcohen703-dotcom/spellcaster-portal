@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Sentinel Console Journal</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+      background: radial-gradient(900px 600px at 10% -10%, #111827, #020617);
+      color: #e5e7eb;
+      display: flex;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    .wrap {
+      width: min(900px, 96vw);
+      margin: 2rem 0;
+      background: rgba(15,23,42,.96);
+      border-radius: 18px;
+      padding: 1.4rem 1.6rem;
+      border: 1px solid rgba(148,163,184,.25);
+      box-shadow: 0 18px 45px rgba(0,0,0,.8);
+    }
+    h1 {
+      margin-top: 0;
+      font-size: 1.4rem;
+    }
+    .muted {
+      color: #9ca3af;
+      font-size: .9rem;
+    }
+    pre {
+      background: #020617;
+      border-radius: 10px;
+      padding: .7rem .9rem;
+      max-height: 50vh;
+      overflow: auto;
+      border: 1px solid rgba(148,163,184,.35);
+      font-size: .9rem;
+    }
+    a.button {
+      display:inline-block;
+      margin-top: 1rem;
+      padding: .5rem .9rem;
+      border-radius: 999px;
+      border: 1px solid rgba(56,189,248,.8);
+      color: #e0f2fe;
+      text-decoration: none;
+      font-size: .9rem;
+      background: linear-gradient(180deg,#38bdf8,#0ea5e9);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Sentinel Console Journal</h1>
+    <p class="muted">
+      This is a placeholder page for the console journal panel.
+      The main Spellcaster Portal UI is still available below.
+    </p>
+
+    {% if error %}
+      <p class="muted">Error: {{ error }}</p>
+    {% endif %}
+
+    {% if entries %}
+      <h2>Entries</h2>
+      <pre>
+{% for line in entries %}
+{{ line }}
+{% endfor %}
+      </pre>
+    {% else %}
+      <p class="muted">No console journal entries yet.</p>
+    {% endif %}
+
+    <a href="/" class="button">Back to Spellcaster Portal</a>
+  </div>
+</body>
+</html>

@@ -1,0 +1,8 @@
+Flask==3.0.3
+gunicorn==22.0.0
+flask-socketio==5.3.6
+python-socketio==5.11.2
+eventlet==0.36.1
+openai>=1.0.0
+PyPDF2>=3.0.0
+pdfminer.six>=20231228

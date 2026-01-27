@@ -1,0 +1,183 @@
+{
+  "homes": [
+    {
+      "id": "H001",
+      "name": "Lantern Cabin",
+      "world_id": "W001",
+      "style": "cabin",
+      "size": "small",
+      "materials": "cedar + stone",
+      "defense": "warded",
+      "amenities": [
+        "fireplace",
+        "tea shelf",
+        "reading nook"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "H002",
+      "name": "Butterfly Cottage",
+      "world_id": "W002",
+      "style": "cottage",
+      "size": "small",
+      "materials": "whitewood",
+      "defense": "none",
+      "amenities": [
+        "garden bench",
+        "seed chest",
+        "sunroom"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "H003",
+      "name": "Star Deck Loft",
+      "world_id": "W003",
+      "style": "loft",
+      "size": "medium",
+      "materials": "glass + steel",
+      "defense": "alarm runes",
+      "amenities": [
+        "telescope dock",
+        "lab bench",
+        "quiet bed"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "H004",
+      "name": "Forge Dormitory",
+      "world_id": "W004",
+      "style": "barracks",
+      "size": "large",
+      "materials": "iron + basalt",
+      "defense": "guards",
+      "amenities": [
+        "tool wall",
+        "hot baths",
+        "training ring"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "H005",
+      "name": "Hearthhouse",
+      "world_id": "W005",
+      "style": "farmhouse",
+      "size": "medium",
+      "materials": "pine + clay",
+      "defense": "watch bell",
+      "amenities": [
+        "bread oven",
+        "family table",
+        "river porch"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "H006",
+      "name": "Arcade Studio",
+      "world_id": "W006",
+      "style": "studio",
+      "size": "small",
+      "materials": "concrete + neon glass",
+      "defense": "keypad",
+      "amenities": [
+        "music pad",
+        "retro console",
+        "mini fridge"
+      ],
+      "created_by": "system"
+    },
+    {
+      "name": "Untitled Home",
+      "world": "W011",
+      "style": "tower",
+      "size": "medium",
+      "theme": "royal",
+      "materials": "crystal",
+      "security": "traps",
+      "amenities": "portal-door",
+      "wizard": {
+        "answers": {
+          "world": "W011",
+          "style": "tower",
+          "size": "medium",
+          "theme": "royal",
+          "materials": "crystal",
+          "security": "traps",
+          "amenities": "portal-door"
+        }
+      },
+      "id": "H007"
+    },
+    {
+      "name": "Kathleen-Diane",
+      "world": "W001",
+      "style": "always-changing",
+      "size": "easy",
+      "theme": "cozy",
+      "materials": "stone, cedar",
+      "security": "armed",
+      "amenities": "fireplace, portal to amenities and friends",
+      "owner": "Guest-Zv0O",
+      "tags": [
+        "manual"
+      ],
+      "id": "H008"
+    },
+    {
+      "name": "Name",
+      "world": "W002",
+      "style": "lake-house",
+      "size": "huge",
+      "theme": "cozy",
+      "materials": "stone, cedar",
+      "security": "low",
+      "amenities": "fireplace, garden, arcade",
+      "owner": "Guest-Zv0O",
+      "tags": [
+        "manual"
+      ],
+      "id": "H009"
+    },
+    {
+      "name": "Untitled Home",
+      "world": "W016",
+      "style": "mansion",
+      "size": "hidden",
+      "theme": "kids-creative",
+      "materials": "crystal",
+      "security": "hidden",
+      "amenities": "observatory",
+      "wizard": {
+        "answers": {
+          "world": "W016",
+          "style": "mansion",
+          "size": "hidden",
+          "theme": "kids-creative",
+          "materials": "crystal",
+          "security": "hidden",
+          "amenities": "observatory"
+        }
+      },
+      "id": "H010"
+    },
+    {
+      "name": "make this home yours",
+      "world": "W016",
+      "style": "cottage",
+      "size": "small",
+      "theme": "cozy",
+      "materials": "wood",
+      "security": "low",
+      "amenities": "garden",
+      "owner": "Guest-CcvM",
+      "tags": [
+        "manual"
+      ],
+      "id": "H011"
+    }
+  ]
+}

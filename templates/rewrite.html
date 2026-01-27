@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<article class="card">
+  <h3>Add Rewrite</h3>
+  <form hx-post="/portal/rewrite/api" hx-target="#rewrites" hx-swap="afterbegin">
+    <div class="grid">
+      <textarea name="original" rows="4" placeholder="Original memory…" required></textarea>
+      <textarea name="rewritten" rows="4" placeholder="Reimagined version…" required></textarea>
+    </div>
+    <input name="tags" placeholder="Tags (optional)" />
+    <button type="submit">Save</button>
+  </form>
+</article>
+<article class="card">
+  <h3>Entries</h3>
+  <div id="rewrites" hx-get="/portal/rewrite/list" hx-trigger="load"></div>
+</article>
+{% endblock %}

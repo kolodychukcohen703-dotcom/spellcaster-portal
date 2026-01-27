@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title or "Sentinel Suite" }}</title>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <style>
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; }
+      .card { padding: 1rem; border-radius: 16px; box-shadow: 0 6px 18px rgba(0,0,0,.08); }
+      .muted { color: #707070; font-size: .9rem; }
+      header { margin: 1.5rem 0; }
+    </style>
+  </head>
+  <body>
+    <main class="container">
+      <header>
+        <h1>{{ title or "Sentinel Suite" }}</h1>
+        <p class="muted">Portal • Journal • Audio • Legacy Tools</p>
+      </header>
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>

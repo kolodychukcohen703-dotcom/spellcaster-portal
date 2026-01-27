@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Sentinel Web Journal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+      background: radial-gradient(900px 600px at 10% -10%, #111827, #020617);
+      color: #e5e7eb;
+      display: flex;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    .wrap {
+      width: min(960px, 96vw);
+      margin: 2rem 0;
+      background: rgba(15,23,42,.96);
+      border-radius: 18px;
+      padding: 1.4rem 1.6rem 1.6rem;
+      border: 1px solid rgba(148,163,184,.25);
+      box-shadow: 0 18px 45px rgba(0,0,0,.8);
+    }
+    h1 {
+      margin-top: 0;
+      font-size: 1.4rem;
+    }
+    .muted {
+      color: #9ca3af;
+      font-size: .9rem;
+    }
+    textarea {
+      width: 100%;
+      min-height: 130px;
+      border-radius: 12px;
+      padding: .7rem .9rem;
+      border: 1px solid rgba(148,163,184,.5);
+      background: #020617;
+      color: #e5e7eb;
+      font-size: .95rem;
+      resize: vertical;
+      outline: none;
+    }
+    textarea:focus {
+      border-color: #a855f7;
+      box-shadow: 0 0 0 2px rgba(168,85,247,.35);
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .6rem;
+      align-items: center;
+      margin-top: .6rem;
+    }
+    .chips {
+      display: inline-flex;
+      gap: .4rem;
+      flex-wrap: wrap;
+    }
+    .chip {
+      padding: .25rem .6rem;
+      border-radius: 999px;
+      border: 1px solid rgba(148,163,184,.6);
+      font-size: .8rem;
+      cursor: pointer;
+      user-select: none;
+    }
+    .chip.active {
+      border-color: rgba(168,85,247,.9);
+      background: linear-gradient(180deg,rgba(168,85,247,.6),rgba(129,140,248,.7));
+      color: #0b1020;
+      font-weight: 500;
+    }
+    button {
+      padding: .55rem .95rem;
+      border-radius: 999px;
+      border: 1px solid rgba(56,189,248,.75);
+      background: linear-gradient(180deg,#38bdf8,#0ea5e9);
+      color: #022c22;
+      font-size: .9rem;
+      cursor: pointer;
+    }
+    button:disabled {
+      opacity: .5;
+      cursor: default;
+    }
+    #status {
+      font-size: .85rem;
+      color: #9ca3af;
+    }
+    #reflectionBox {
+      margin-top: 1rem;
+      padding: .8rem .9rem;
+      border-radius: 12px;
+      border: 1px solid rgba(148,163,184,.4);
+      background: #020617;
+      max-height: 260px;
+      overflow: auto;
+      white-space: pre-wrap;
+      font-size: .9rem;
+    }
+    .entriesBox {
+      margin-top: 1rem;
+      padding: .7rem .9rem;
+      border-radius: 12px;
+      border: 1px dashed rgba(148,163,184,.4);
+      background: rgba(2,6,23,.9);
+      max-height: 200px;
+      overflow: auto;
+      font-size: .85rem;
+      white-space: pre-wrap;
+    }
+    .topbar {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:.5rem;
+      margin-bottom:.4rem;
+    }
+    a.link {
+      color:#38bdf8;
+      text-decoration:none;
+      font-size:.85rem;
+    }
+    a.link:hover {
+      text-decoration:underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div>
+        <h1>Sentinel Web Journal</h1>
+        <div class="muted">Write an entry, choose mode, and let the API reflect back or read your dreams.</div>
+      </div>
+      <div>
+        <a href="/" class="link">← Back to Spellcaster Portal</a><br/>
+        <a href="/console_journal" class="link" style="font-size:.8rem;">Open console journal view</a>
+      </div>
+    </div>
+
+    <label class="muted" for="entry">Entry</label>
+    <textarea id="entry" placeholder="Type your journal or dream entry here…"></textarea>
+
+    <div class="row">
+      <div class="chips">
+        <div class="chip active" data-mode="journal">Journal</div>
+        <div class="chip" data-mode="dream">Dream</div>
+      </div>
+      <button id="sendBtn">Save & Reflect</button>
+      <span id="status"></span>
+    </div>
+
+    <div id="reflectionBox" style="display:none;"></div>
+
+    <div class="entriesBox">
+      {% if entries %}
+      <div class="muted" style="margin-bottom:.3rem;">Recent entries (tail of log):</div>
+{{ ''.join(entries) }}
+      {% else %}
+      <div class="muted">No previous web-journal entries logged yet.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <script>
+    const chips = document.querySelectorAll('.chip');
+    const entryEl = document.getElementById('entry');
+    const sendBtn = document.getElementById('sendBtn');
+    const statusEl = document.getElementById('status');
+    const reflectionBox = document.getElementById('reflectionBox');
+
+    let mode = 'journal';
+
+    chips.forEach(ch => {
+      ch.addEventListener('click', () => {
+        chips.forEach(c => c.classList.remove('active'));
+        ch.classList.add('active');
+        mode = ch.dataset.mode || 'journal';
+      });
+    });
+
+    async function sendEntry(){
+      const text = (entryEl.value || '').trim();
+      if(!text){
+        statusEl.textContent = 'Please type something first.';
+        return;
+      }
+      sendBtn.disabled = true;
+      statusEl.textContent = 'Sending to API…';
+
+      try{
+        const res = await fetch('/api/journal_reflect', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ entry: text, mode })
+        });
+        const data = await res.json();
+        if(!res.ok){
+          statusEl.textContent = data.error ? ('Error: ' + data.error) : 'Request failed.';
+          return;
+        }
+        statusEl.textContent = 'Saved at ' + (data.timestamp || '');
+        if(data.reflection){
+          reflectionBox.style.display = 'block';
+          reflectionBox.textContent = data.reflection;
+        } else {
+          reflectionBox.style.display = 'none';
+        }
+      } catch(e){
+        console.error(e);
+        statusEl.textContent = 'Error talking to server.';
+      } finally {
+        sendBtn.disabled = false;
+      }
+    }
+
+    sendBtn.addEventListener('click', sendEntry);
+    entryEl.addEventListener('keydown', (e) => {
+      if(e.key === 'Enter' && (e.ctrlKey || e.metaKey)){
+        e.preventDefault();
+        sendEntry();
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="grid">
+  <article class="card"><h3>Journal</h3><p>Write entries, tag symbols.</p><footer><a href="/journal/entries">API</a> <a role="button" href="/portal/journal">Open</a></footer></article>
+  <article class="card"><h3>Audio Converter</h3><p>Text → TTS (Piper/OpenAI)</p><footer><a href="/audio/docs">API (soon)</a> <a role="button" href="/portal/audio">Open</a></footer></article>
+  <article class="card"><h3>Witness Terminal</h3><p>Glyphs & prompts.</p><footer><a href="/portal/witness">Open</a></footer></article>
+  <article class="card"><h3>Fantasy Console</h3><p>ASCII frame player.</p><footer><a href="/portal/fantasy">Open</a></footer></article>
+  <article class="card"><h3>Rewrite Memory</h3><p>Original → Reimagined.</p><footer><a href="/portal/rewrite">Open</a></footer></article>
+  <article class="card"><h3>Symbol Glossary</h3><p>Meanings & frequency.</p><footer><a href="/portal/glossary">Open</a></footer></article>
+  <article class="card"><h3>Backups</h3><p>Run backup jobs.</p><footer><a href="/portal/backups">Open</a></footer></article>
+  <article class="card"><h3>Symbol Map</h3><p>Co-occurrence graph JSON.</p><footer><a href="/portal/symbolmap">Open</a></footer></article>
+  <article class="card"><h3>Rune Game</h3><p>Learn the runes.</p><footer><a href="/portal/runegame">Open</a></footer></article>
+
+  <article class="card">
+    <h3>Spellcaster Portal</h3>
+    <p>Search & cast from your library.</p>
+    <footer>
+      <a role="button" href="/portal/spellcaster-splash">Open</a>
+    </footer>
+  </article>
+
+</section>
+{% endblock %}

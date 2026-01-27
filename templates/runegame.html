@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<article class="card">
+  <h3>Rune Game</h3>
+  <div class="grid">
+    <button hx-post="/portal/runegame/seed-full" hx-target="#rg-status">Seed Full Set (24)</button>
+    <button hx-get="/portal/runegame/start" hx-target="#rg-game">Start (5 rounds)</button>
+  </div>
+  <div id="rg-status" class="muted" style="margin-top:8px"></div>
+</article>
+
+<article class="card">
+  <h3>Play</h3>
+  <div id="rg-game" class="muted">Click Start to begin.</div>
+</article>
+{% endblock %}

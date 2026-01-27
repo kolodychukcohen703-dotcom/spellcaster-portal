@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<article class="card">
+  <h3>Backups</h3>
+  <div class="grid">
+    <button hx-post="/portal/backups/run/daily" hx-target="#bk-out">Run daily</button>
+  </div>
+  <pre id="bk-out" class="muted">No run yet.</pre>
+</article>
+{% endblock %}

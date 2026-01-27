@@ -1,0 +1,442 @@
+{
+  "worlds": [
+    {
+      "id": "W001",
+      "name": "Sanctuary-Lobby",
+      "biome": "forest",
+      "climate": "temperate",
+      "magic": "high",
+      "tech": "mid",
+      "governance": "council",
+      "economy": "craft + trade",
+      "danger": "low",
+      "mood": "welcoming",
+      "population": 1200,
+      "landmarks": [
+        "Lantern Gate",
+        "Whisper Station",
+        "Cedar Hall"
+      ],
+      "tags": [
+        "lobby",
+        "safe",
+        "family"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "W002",
+      "name": "Kathleen-Garden",
+      "biome": "orchard",
+      "climate": "mild",
+      "magic": "gentle",
+      "tech": "low",
+      "governance": "caretaker",
+      "economy": "herbalism",
+      "danger": "low",
+      "mood": "soft",
+      "population": 220,
+      "landmarks": [
+        "Butterfly Pergola",
+        "Sunlit Greenhouse",
+        "Stone Well"
+      ],
+      "tags": [
+        "garden",
+        "healing"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "W003",
+      "name": "Diane-Observatory",
+      "biome": "mountain",
+      "climate": "crisp",
+      "magic": "mystic",
+      "tech": "mid",
+      "governance": "archives",
+      "economy": "research",
+      "danger": "medium",
+      "mood": "quiet",
+      "population": 340,
+      "landmarks": [
+        "Star Dome",
+        "Glass Walkway",
+        "Archive Vault"
+      ],
+      "tags": [
+        "stars",
+        "study"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "W004",
+      "name": "Anthony-Forge",
+      "biome": "volcanic",
+      "climate": "hot",
+      "magic": "high",
+      "tech": "high",
+      "governance": "guild",
+      "economy": "metalwork",
+      "danger": "medium",
+      "mood": "driven",
+      "population": 800,
+      "landmarks": [
+        "Hammer Square",
+        "Cooling Canals",
+        "Ember Foundry"
+      ],
+      "tags": [
+        "forge",
+        "industry"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "W005",
+      "name": "Family-Hearth",
+      "biome": "village",
+      "climate": "four-seasons",
+      "magic": "low",
+      "tech": "low",
+      "governance": "elders",
+      "economy": "farming",
+      "danger": "low",
+      "mood": "cozy",
+      "population": 560,
+      "landmarks": [
+        "Hearth Plaza",
+        "Bread Oven",
+        "River Bridge"
+      ],
+      "tags": [
+        "home",
+        "food"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "W006",
+      "name": "Friend-Arcade",
+      "biome": "neon-city",
+      "climate": "night",
+      "magic": "spark",
+      "tech": "high",
+      "governance": "districts",
+      "economy": "games + music",
+      "danger": "low",
+      "mood": "electric",
+      "population": 1500,
+      "landmarks": [
+        "Arcade Row",
+        "Synth Market",
+        "Pixel Pier"
+      ],
+      "tags": [
+        "fun",
+        "city"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "W007",
+      "name": "Witness-Hall",
+      "biome": "cathedral",
+      "climate": "still",
+      "magic": "ritual",
+      "tech": "low",
+      "governance": "vows",
+      "economy": "offerings",
+      "danger": "low",
+      "mood": "solemn",
+      "population": 70,
+      "landmarks": [
+        "Bloodstone Floor",
+        "Oath Lanterns",
+        "Memory Alcoves"
+      ],
+      "tags": [
+        "witness",
+        "symbol"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "W008",
+      "name": "Ryoko-Homeforge",
+      "biome": "mansion-realms",
+      "climate": "variable",
+      "magic": "design",
+      "tech": "high",
+      "governance": "architects",
+      "economy": "build credits",
+      "danger": "low",
+      "mood": "creative",
+      "population": 420,
+      "landmarks": [
+        "Blueprint Atrium",
+        "Room Loom",
+        "Hallway Atelier"
+      ],
+      "tags": [
+        "builder",
+        "homes"
+      ],
+      "created_by": "system"
+    },
+    {
+      "id": "W009",
+      "name": "Cohen-Starmap-Deck",
+      "biome": "sky-platform",
+      "climate": "clear",
+      "magic": "cosmic",
+      "tech": "mid",
+      "governance": "navigator",
+      "economy": "mapping",
+      "danger": "medium",
+      "mood": "awe",
+      "population": 130,
+      "landmarks": [
+        "Starmap Table",
+        "Signal Mast",
+        "North Window"
+      ],
+      "tags": [
+        "starmap",
+        "signal"
+      ],
+      "created_by": "system"
+    },
+    {
+      "name": "Untitled World",
+      "biome": "forest",
+      "climate": "variable",
+      "magic": "ancient",
+      "tech": "spacefaring",
+      "governance": "caretakers",
+      "economy": "tourism",
+      "danger": "very low",
+      "mood": "playful",
+      "population": 1000,
+      "tags": [
+        "beginner",
+        "wizard"
+      ],
+      "landmarks": [
+        "Lantern Plaza",
+        "Owl Hollow",
+        "Hidden Archive"
+      ],
+      "wizard": {
+        "difficulty": "beginner",
+        "answers": {
+          "biome": "forest",
+          "climate": "variable",
+          "magic": "ancient",
+          "tech": "spacefaring",
+          "governance": "caretakers",
+          "economy": "tourism",
+          "danger": "very low",
+          "mood": "playful",
+          "species": "humans",
+          "sky": "ringed planet"
+        }
+      },
+      "id": "W010",
+      "visibility": "public",
+      "allowed_users": [
+        "Guest--vuj"
+      ],
+      "owner": "Guest--vuj"
+    },
+    {
+      "name": "Heaven",
+      "biome": "forest",
+      "climate": "temperate",
+      "magic": "mid",
+      "tech": "low",
+      "governance": "council",
+      "economy": "trade",
+      "danger": "low",
+      "mood": "welcoming",
+      "population": 1000,
+      "owner": "Guest-Zv0O",
+      "visibility": "public",
+      "allowed_users": [
+        "Guest-Zv0O"
+      ],
+      "tags": [
+        "manual"
+      ],
+      "id": "W011"
+    },
+    {
+      "name": "Jhakarta",
+      "biome": "casio-entertainment-shopping-vacation-hospitality",
+      "climate": "temperate",
+      "magic": "mid",
+      "tech": "low",
+      "governance": "council",
+      "economy": "trade",
+      "danger": "low",
+      "mood": "welcoming",
+      "population": 1000,
+      "owner": "Guest-Zv0O",
+      "visibility": "public",
+      "allowed_users": [
+        "Guest-Zv0O"
+      ],
+      "tags": [
+        "manual"
+      ],
+      "id": "W012"
+    },
+    {
+      "name": "Untitled World",
+      "biome": "tundra",
+      "climate": "monsoon",
+      "magic": "forbidden",
+      "tech": "spacefaring",
+      "governance": "AI steward",
+      "economy": "salvage",
+      "danger": "low",
+      "mood": "serene",
+      "population": 1000,
+      "tags": [
+        "advanced",
+        "wizard"
+      ],
+      "landmarks": [
+        "solar Plaza",
+        "wolves Hollow",
+        "royal scandal Archive"
+      ],
+      "wizard": {
+        "difficulty": "advanced",
+        "answers": {
+          "biome": "tundra",
+          "climate": "monsoon",
+          "magic": "forbidden",
+          "tech": "spacefaring",
+          "governance": "AI steward",
+          "economy": "salvage",
+          "danger": "low",
+          "mood": "serene",
+          "species": "dragons",
+          "sky": "nebula",
+          "faction": "Ash Monks",
+          "hazard": "sleep-dream rifts",
+          "resource": "crystals",
+          "travel": "roads",
+          "art": "calligraphy",
+          "holiday": "Lantern Night",
+          "law": "strict",
+          "outsiders": "tested",
+          "aesthetic": "solar",
+          "creature": "wolves",
+          "seasons": "endless summer",
+          "currency": "tokens",
+          "belief": "machine",
+          "food": "seaweed",
+          "tone": "hopeful",
+          "threat": "void",
+          "magic_source": "ley lines",
+          "defense": "guardians",
+          "portals": "cloud tunnels",
+          "secret": "royal scandal"
+        }
+      },
+      "id": "W013",
+      "visibility": "public",
+      "allowed_users": [
+        "Guest-MCCZ"
+      ],
+      "owner": "Guest-MCCZ"
+    },
+    {
+      "name": "Untitled World",
+      "biome": "sky-islands",
+      "climate": "humid",
+      "magic": "ritual",
+      "tech": "modern",
+      "governance": "anarchy",
+      "economy": "research",
+      "danger": "unknown",
+      "mood": "playful",
+      "population": 1000,
+      "tags": [
+        "beginner",
+        "wizard"
+      ],
+      "landmarks": [
+        "Lantern Plaza",
+        "Owl Hollow",
+        "Hidden Archive"
+      ],
+      "wizard": {
+        "difficulty": "beginner",
+        "answers": {
+          "biome": "sky-islands",
+          "climate": "humid",
+          "magic": "ritual",
+          "tech": "modern",
+          "governance": "anarchy",
+          "economy": "research",
+          "danger": "unknown",
+          "mood": "playful",
+          "species": "dragons",
+          "sky": "two moons"
+        }
+      },
+      "id": "W014",
+      "visibility": "public",
+      "allowed_users": [
+        "Guest-sNIE"
+      ],
+      "owner": "Guest-sNIE"
+    },
+    {
+      "name": "Remix-world",
+      "biome": "kelowna-BC",
+      "climate": "temperate",
+      "magic": "mid",
+      "tech": "low",
+      "governance": "council",
+      "economy": "trade",
+      "danger": "low",
+      "mood": "welcoming",
+      "population": 1000,
+      "owner": "Guest-D_vJ",
+      "visibility": "public",
+      "allowed_users": [
+        "Guest-D_vJ"
+      ],
+      "tags": [
+        "manual"
+      ],
+      "id": "W015"
+    },
+    {
+      "name": "chatGPT world",
+      "biome": "small-city-surrounded-by-forests-water-canals-run-down-mountain-sides&homes",
+      "climate": "hot",
+      "magic": "high",
+      "tech": "futuristic-but-rustic",
+      "governance": "council",
+      "economy": "craft + trade",
+      "danger": "low",
+      "mood": "calm",
+      "population": 1000,
+      "owner": "Guest-nVZk",
+      "visibility": "public",
+      "allowed_users": [
+        "Guest-nVZk"
+      ],
+      "tags": [
+        "manual"
+      ],
+      "id": "W016"
+    }
+  ]
+}

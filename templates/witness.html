@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block content %}
+<article class="card">
+  <h3>Witness Terminal</h3>
+  <div id="wit" hx-get="/portal/witness/api" hx-trigger="load"></div>
+</article>
+{% endblock %}

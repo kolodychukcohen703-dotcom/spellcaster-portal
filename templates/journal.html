@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<article class="card">
+  <h3>New Entry</h3>
+  <form hx-post="/journal/entries" hx-target="#entries" hx-swap="afterbegin">
+    <div class="grid">
+      <input name="title" placeholder="Title" required />
+      <input name="tags"  placeholder="Tags (comma-separated symbols)" />
+    </div>
+    <textarea name="body" placeholder="Body..." rows="6" required></textarea>
+    <button type="submit">Save</button>
+  </form>
+</article>
+
+<article class="card">
+  <h3>Entries</h3>
+  <div id="entries" hx-get="/portal/journal/list" hx-trigger="load"></div>
+</article>
+{% endblock %}
