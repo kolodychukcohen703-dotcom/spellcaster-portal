@@ -400,7 +400,7 @@ def _safe_filename(name: str) -> str:
 
 def _is_safe_zip_member(member_name: str) -> bool:
     p = Path(member_name)
-    if member_name.startswith(("/", "\")):
+    if member_name.startswith(("/", "\\")):
         return False
     if ".." in p.parts:
         return False
