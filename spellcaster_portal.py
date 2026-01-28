@@ -1,6 +1,3 @@
-import zipfile
-import shutil
-import threading
 #!/usr/bin/env python3
 """
 Spellcaster Web Portal — Cohen Edition (with login)
@@ -24,9 +21,6 @@ from typing import List, Dict, Optional
 
 from functools import wraps
 from flask import Flask, request, render_template, redirect, url_for, session, jsonify
-from werkzeug.exceptions import RequestEntityTooLarge
-
-    Flask,
     request,
     jsonify,
     send_from_directory,
@@ -59,37 +53,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 LIB_DIR = BASE_DIR / "library"
 DB_PATH = BASE_DIR / "spellcaster.db"
 LIB_DIR.mkdir(parents=True, exist_ok=True)
-
-
-# ---- Background reindex (debounced) ----
-REINDEX_STATUS = {"running": False, "message": "Idle"}
-_REINDEX_TIMER = None
-_REINDEX_LOCK = threading.Lock()
-
-def _run_reindex_job():
-    REINDEX_STATUS["running"] = True
-    REINDEX_STATUS["message"] = "Reindexing…"
-    try:
-        summary = index_library(use_cleaner=DEFAULT_USE_CLEANER)
-        REINDEX_STATUS["message"] = f"Done. +{summary['inserted']} new, {summary['updated']} updated (total {summary['total_docs']})."
-    except Exception as e:
-        REINDEX_STATUS["message"] = f"Reindex failed: {e}"
-    finally:
-        REINDEX_STATUS["running"] = False
-
-def schedule_reindex(delay_seconds: int = 3):
-    """Debounce reindex so multiple uploads trigger only one index run."""
-    global _REINDEX_TIMER
-    with _REINDEX_LOCK:
-        if _REINDEX_TIMER is not None:
-            try:
-                _REINDEX_TIMER.cancel()
-            except Exception:
-                pass
-        REINDEX_STATUS["message"] = f"Queued reindex… (starts in {delay_seconds}s)"
-        _REINDEX_TIMER = threading.Timer(delay_seconds, _run_reindex_job)
-        _REINDEX_TIMER.daemon = True
-        _REINDEX_TIMER.start()
 
 DEFAULT_USE_CLEANER = True
 DEFAULT_LIKE_FALLBACK = True
@@ -433,13 +396,6 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
 )
-
-
-@app.errorhandler(RequestEntityTooLarge)
-def handle_413(e):
-    mb = int(os.getenv("MAX_UPLOAD_MB", "75"))
-    return render_template("upload.html", message=f"Upload too large (413). Current limit is {mb} MB. Split into smaller ZIPs or raise MAX_UPLOAD_MB on Render."), 413
-
 
 # ---- Auth helpers ---------------------------------------------------------
 
@@ -2262,135 +2218,39 @@ if __name__ == "__main__":
 
 
 
-
-
-@app.route("/reindex_status")
-@login_required
-def reindex_status():
-    return jsonify(REINDEX_STATUS)
-
-@app.route("/scan_library", methods=["POST"])
-@login_required
-def scan_library():
-    schedule_reindex(delay_seconds=1)
-    return "Reindex queued. You can keep uploading; it will run after uploads settle."
 @app.route("/upload", methods=["GET", "POST"])
 @login_required
 def upload():
-    """
-    Upload PDFs/TXT/MD plus ZIP bundles.
-    Supports multi-file uploads and folder uploads (browser supplies relpaths).
-    Reindex runs in the background (debounced) to avoid request timeouts.
-    """
+    """Upload PDFs/TXT/MD into the library folder (stored under DATA_DIR)."""
     message = None
-
-    def _sanitize_relpath(p: str) -> Path:
-        p = (p or "").replace("\\", "/")
-        parts = [x for x in p.split("/") if x and x not in (".", "..")]
-        safe_parts = [re.sub(r"[^a-zA-Z0-9._ -]+", "_", x).strip() for x in parts]
-        safe_parts = [x for x in safe_parts if x]
-        return Path(*safe_parts) if safe_parts else Path("upload.bin")
-
-    def _unique_dest(dest: Path) -> Path:
-        if not dest.exists():
-            return dest
-        stem = dest.stem
-        ext = dest.suffix
-        for i in range(1, 10000):
-            cand = dest.parent / f"{stem}_{i}{ext}"
-            if not cand.exists():
-                return cand
-        return dest
-
-    def safe_extract_zip(zip_path: Path, dest_dir: Path) -> dict:
-        extracted = 0
-        skipped = 0
-        allowed = {".pdf", ".txt", ".md", ".doc", ".docx"}
-        with zipfile.ZipFile(zip_path, "r") as z:
-            for info in z.infolist():
-                name = info.filename or ""
-                if name.endswith("/") or name.endswith("\\"):
-                    continue
-                norm = name.replace("\\", "/")
-                parts = [p for p in norm.split("/") if p and p not in (".", "..")]
-                if not parts:
-                    skipped += 1
-                    continue
-                out_rel = _sanitize_relpath("/".join(parts))
-                out_path = (dest_dir / out_rel).resolve()
-                try:
-                    out_path.relative_to(dest_dir.resolve())
-                except Exception:
-                    skipped += 1
-                    continue
-                if out_path.suffix.lower() not in allowed:
-                    skipped += 1
-                    continue
-                out_path.parent.mkdir(parents=True, exist_ok=True)
-                out_path = _unique_dest(out_path)
-                with z.open(info) as src, open(out_path, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
-                extracted += 1
-        return {"extracted": extracted, "skipped": skipped}
-
     if request.method == "POST":
-        files = request.files.getlist("files")
-        relpaths = request.form.getlist("relpaths")
-
-        # backward compat: older template used "file"
-        if not files:
-            one = request.files.get("file")
-            if one and one.filename:
-                files = [one]
-                relpaths = [one.filename]
-
-        if not files:
-            message = "No files selected."
-            return render_template("upload.html", message=message)
-
-        LIB_DIR.mkdir(parents=True, exist_ok=True)
-
-        saved = 0
-        extracted_total = 0
-        skipped_total = 0
-        rejected = 0
-
-        for i, f in enumerate(files):
-            if not f or not f.filename:
-                continue
-
-            rp = relpaths[i] if i < len(relpaths) else f.filename
-            rel = _sanitize_relpath(rp)
-            dest = (LIB_DIR / rel)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest = _unique_dest(dest)
-
-            ext = dest.suffix.lower()
-            if ext not in {".pdf", ".txt", ".md", ".zip", ".doc", ".docx"}:
-                rejected += 1
-                continue
-
-            f.save(dest)
-            saved += 1
-
-            if ext == ".zip":
-                res = safe_extract_zip(dest, LIB_DIR)
-                extracted_total += res["extracted"]
-                skipped_total += res["skipped"]
-                try:
-                    dest.unlink(missing_ok=True)
-                except Exception:
-                    pass
-
-        schedule_reindex(delay_seconds=3)
-
-        parts = [f"Uploaded: {saved}"]
-        if extracted_total or skipped_total:
-            parts.append(f"ZIP extracted: {extracted_total} (skipped {skipped_total})")
-        if rejected:
-            parts.append(f"Rejected: {rejected}")
-        parts.append("Reindex queued in background.")
-        message = " • ".join(parts)
-
+        f = request.files.get("file")
+        if not f or not f.filename:
+            message = "No file selected."
+        else:
+            name = os.path.basename(f.filename)
+            # basic extension allow-list
+            ext = Path(name).suffix.lower()
+            allowed = {".pdf", ".txt", ".md"}
+            if ext not in allowed:
+                message = "Unsupported file type. Allowed: PDF, TXT, MD."
+            else:
+                # sanitize filename
+                safe = re.sub(r"[^a-zA-Z0-9._ -]+", "_", name).strip().replace("..", ".")
+                if not safe:
+                    safe = f"upload_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}{ext}"
+                dest = LIB_DIR / safe
+                # avoid overwrite by adding suffix
+                if dest.exists():
+                    stem = dest.stem
+                    for i in range(1, 1000):
+                        candidate = LIB_DIR / f"{stem}_{i}{ext}"
+                        if not candidate.exists():
+                            dest = candidate
+                            break
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                f.save(dest)
+                # Reindex after upload
+                summary = index_library(use_cleaner=DEFAULT_USE_CLEANER)
+                message = f"Uploaded to {dest.name}. Reindex complete: +{summary['inserted']} new, {summary['updated']} updated."
     return render_template("upload.html", message=message)
-
