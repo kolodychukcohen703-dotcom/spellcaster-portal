@@ -1,9 +1,3 @@
-from __future__ import annotations
-
-import json
-import shutil
-import zipfile
-import threading
 #!/usr/bin/env python3
 """
 Spellcaster Web Portal — Cohen Edition (with login)
@@ -19,6 +13,7 @@ Features:
 - Login / password wall to protect the whole portal
 """
 
+from __future__ import annotations
 import os, re, sqlite3, unicodedata
 from datetime import datetime
 from pathlib import Path
@@ -37,7 +32,6 @@ from flask import (
     url_for,
     render_template,
 )
-from werkzeug.exceptions import RequestEntityTooLarge
 
 
 import openai
@@ -58,29 +52,6 @@ PASSWORD = os.getenv("PORTAL_PASS", "fast5man!@")  # set PORTAL_PASS on Render
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 LIB_DIR = BASE_DIR / "library"
-
-# ---- Library manifest (what's currently in /library) ----
-def write_library_manifest():
-    """Write a JSON manifest of library files so you can see what's been ingested."""
-    try:
-        LIB_DIR.mkdir(parents=True, exist_ok=True)
-        allowed = {".pdf", ".txt", ".md", ".doc", ".docx"}
-        items = []
-        for p in LIB_DIR.rglob("*"):
-            if not p.is_file():
-                continue
-            if p.suffix.lower() not in allowed:
-                continue
-            rel = str(p.relative_to(LIB_DIR)).replace("\\", "/")
-            st = p.stat()
-            items.append({"path": rel, "size": st.st_size, "mtime": int(st.st_mtime)})
-        items.sort(key=lambda x: x["path"].lower())
-        out = {"generated_utc": int(time.time()), "count": len(items), "items": items}
-        (LIB_DIR / "_library_manifest.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
-        return out["count"]
-    except Exception:
-        return None
-
 DB_PATH = BASE_DIR / "spellcaster.db"
 LIB_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -409,6 +380,64 @@ def index_library(use_cleaner: bool = DEFAULT_USE_CLEANER) -> Dict[str, int]:
     }
 
 # ---- Helpers --------------------------------------------------------------
+
+def index_single_pdf(pdf_path: Path) -> dict:
+    """Index or update a single PDF in the SQLite library DB.
+
+    Returns a small status dict: {status: 'indexed'|'skipped'|'error', relpath: str, reason?: str}
+    """
+    try:
+        if not pdf_path.exists() or not pdf_path.is_file():
+            return {"status": "error", "relpath": str(pdf_path), "reason": "file_not_found"}
+        if pdf_path.suffix.lower() != ".pdf":
+            return {"status": "skipped", "relpath": str(pdf_path), "reason": "not_pdf"}
+
+        relpath = str(pdf_path.relative_to(LIB_DIR)).replace("\\", "/")
+
+        data = pdf_path.read_bytes()
+        file_hash = hashlib.md5(data).hexdigest()
+
+        title = pdf_path.stem
+        kind = "pdf"
+        content = ""  # we don't extract text here (fast + safe). Use /api/reindex for full rebuild if you add extractors.
+
+        now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+        conn = get_conn()
+        cur = conn.cursor()
+
+        cur.execute("SELECT id, hash FROM documents WHERE relpath = ? AND kind = 'pdf'", (relpath,))
+        row = cur.fetchone()
+
+        if row and row[1] == file_hash:
+            return {"status": "skipped", "relpath": relpath, "reason": "unchanged"}
+
+        if row:
+            doc_id = row[0]
+            cur.execute(
+                "UPDATE documents SET title = ?, content = ?, hash = ?, updated_at = ? WHERE id = ?",
+                (title, content, file_hash, now, doc_id),
+            )
+        else:
+            cur.execute(
+                "INSERT INTO documents (title, relpath, kind, content, hash, added_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (title, relpath, kind, content, file_hash, now, now),
+            )
+
+        conn.commit()
+        return {"status": "indexed", "relpath": relpath}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return {"status": "error", "relpath": str(pdf_path), "reason": str(e)}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
 
 def rel_to_abs(rel_path: str) -> Path:
     p = Path(rel_path)
@@ -1014,6 +1043,158 @@ def api_reindex():
     return jsonify({"status": "ok", "use_cleaner": use_cleaner, **summary})
 
 # ---- Assets ---------------------------------------------------------------
+
+# -----------------------------
+# Resumable (chunked) uploads
+# -----------------------------
+
+UPLOADS_DIR = BASE_DIR / "uploads"
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
+def _upload_state_path(upload_id: str) -> Path:
+    return UPLOADS_DIR / f"{upload_id}.json"
+
+def _upload_part_path(upload_id: str) -> Path:
+    return UPLOADS_DIR / f"{upload_id}.part"
+
+def _safe_relpath(relpath: str) -> str:
+    # Prevent path traversal; keep relative to library folder.
+    relpath = (relpath or "").replace("\\", "/").lstrip("/")
+    relpath = "/".join([p for p in relpath.split("/") if p not in ("", ".", "..")])
+    return relpath
+
+@app.post("/api/upload/init")
+def api_upload_init():
+    """Start a resumable upload session.
+
+    JSON body:
+      - filename: original filename (required)
+      - size: total size in bytes (required)
+      - relpath: relative path under library/ (optional; defaults to filename)
+    """
+    data = request.get_json(silent=True) or {}
+    filename = (data.get("filename") or "").strip()
+    total_size = int(data.get("size") or 0)
+    relpath = _safe_relpath(data.get("relpath") or filename)
+
+    if not filename or total_size <= 0:
+        return jsonify({"ok": False, "error": "filename_and_size_required"}), 400
+
+    upload_id = uuid.uuid4().hex
+    chunk_size = int(os.getenv("UPLOAD_CHUNK_SIZE", str(5 * 1024 * 1024)))  # 5MB default (Render-friendly)
+
+    state = {
+        "upload_id": upload_id,
+        "filename": filename,
+        "relpath": relpath,
+        "total_size": total_size,
+        "chunk_size": chunk_size,
+        "received": [],  # list[int] chunk indexes
+        "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "updated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+    }
+    _upload_state_path(upload_id).write_text(json.dumps(state), encoding="utf-8")
+    # Create empty part file
+    with open(_upload_part_path(upload_id), "ab"):
+        pass
+
+    return jsonify({"ok": True, "upload_id": upload_id, "chunk_size": chunk_size, "received": []})
+
+@app.get("/api/upload/status/<upload_id>")
+def api_upload_status(upload_id: str):
+    sp = _upload_state_path(upload_id)
+    if not sp.exists():
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    state = json.loads(sp.read_text(encoding="utf-8"))
+    part = _upload_part_path(upload_id)
+    state["part_size"] = part.stat().st_size if part.exists() else 0
+    return jsonify({"ok": True, **state})
+
+@app.post("/api/upload/chunk/<upload_id>")
+def api_upload_chunk(upload_id: str):
+    """Upload one chunk.
+
+    Form-data:
+      - chunk: file (required)
+      - index: int (required)
+    """
+    sp = _upload_state_path(upload_id)
+    if not sp.exists():
+        return jsonify({"ok": False, "error": "not_found"}), 404
+
+    state = json.loads(sp.read_text(encoding="utf-8"))
+    chunk_file = request.files.get("chunk")
+    if chunk_file is None:
+        return jsonify({"ok": False, "error": "chunk_required"}), 400
+
+    try:
+        idx = int(request.form.get("index", "-1"))
+    except Exception:
+        idx = -1
+
+    if idx < 0:
+        return jsonify({"ok": False, "error": "index_required"}), 400
+
+    chunk_size = int(state["chunk_size"])
+    offset = idx * chunk_size
+
+    part_path = _upload_part_path(upload_id)
+    os.makedirs(part_path.parent, exist_ok=True)
+
+    # Write at offset (supports resume/out-of-order)
+    with open(part_path, "r+b" if part_path.exists() else "w+b") as f:
+        f.seek(offset)
+        f.write(chunk_file.read())
+
+    if idx not in state["received"]:
+        state["received"].append(idx)
+        state["received"].sort()
+        state["updated_at"] = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        sp.write_text(json.dumps(state), encoding="utf-8")
+
+    return jsonify({"ok": True, "upload_id": upload_id, "received_count": len(state["received"])})
+
+@app.post("/api/upload/complete/<upload_id>")
+def api_upload_complete(upload_id: str):
+    """Finalize a resumable upload: verify size, move into library/, index just that PDF."""
+    sp = _upload_state_path(upload_id)
+    part_path = _upload_part_path(upload_id)
+    if not sp.exists() or not part_path.exists():
+        return jsonify({"ok": False, "error": "not_found"}), 404
+
+    state = json.loads(sp.read_text(encoding="utf-8"))
+    total_size = int(state["total_size"])
+    relpath = _safe_relpath(state["relpath"])
+
+    # Verify size
+    if part_path.stat().st_size != total_size:
+        return jsonify({
+            "ok": False,
+            "error": "size_mismatch",
+            "expected": total_size,
+            "got": part_path.stat().st_size,
+        }), 400
+
+    dest = (LIB_DIR / relpath)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    # Atomic-ish move
+    tmp_dest = dest.with_suffix(dest.suffix + ".tmp")
+    shutil.move(str(part_path), str(tmp_dest))
+    tmp_dest.replace(dest)
+
+    # Cleanup state
+    try:
+        sp.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    # Index incrementally (fast)
+    idx_result = index_single_pdf(dest)
+
+    return jsonify({"ok": True, "saved_to": str(dest), "index": idx_result})
+
+
 @app.route("/assets/<path:filename>")
 def serve_asset(filename: str):
     # Note: this serves files from BASE_DIR, so putting soothing_hum.mp3
@@ -2248,148 +2429,40 @@ if __name__ == "__main__":
 
 
 
-
-
-@app.route("/library_manifest")
-@login_required
-def library_manifest():
-    mf = LIB_DIR / "_library_manifest.json"
-    if not mf.exists():
-        write_library_manifest()
-    if mf.exists():
-        return send_file(mf, as_attachment=True, download_name="library_manifest.json")
-    return jsonify({"ok": False, "message": "Manifest not available yet."}), 404
-
 @app.route("/upload", methods=["GET", "POST"])
 @login_required
 def upload():
-    """
-    Queue-friendly uploader.
-    - Folder uploads supported via relpaths (webkitRelativePath)
-    - ZIP safe-extract supported
-    - Returns JSON when X-Upload-Mode: queue
-    - Reindex is queued in the background (debounced)
-    """
+    """Upload PDFs/TXT/MD into the library folder (stored under DATA_DIR)."""
     message = None
-
-    def _sanitize_relpath(p: str) -> Path:
-        p = (p or "").replace("\\", "/")
-        parts = [x for x in p.split("/") if x and x not in (".", "..")]
-        safe_parts = [re.sub(r"[^a-zA-Z0-9._ -]+", "_", x).strip() for x in parts]
-        safe_parts = [x for x in safe_parts if x]
-        return Path(*safe_parts) if safe_parts else Path("upload.bin")
-
-    def _unique_dest(dest: Path) -> Path:
-        if not dest.exists():
-            return dest
-        stem, ext = dest.stem, dest.suffix
-        for i in range(1, 10000):
-            cand = dest.parent / f"{stem}_{i}{ext}"
-            if not cand.exists():
-                return cand
-        return dest
-
-    def safe_extract_zip(zip_path: Path, dest_dir: Path) -> dict:
-        extracted = 0
-        skipped = 0
-        allowed = {".pdf", ".txt", ".md", ".doc", ".docx"}
-        with zipfile.ZipFile(zip_path, "r") as z:
-            for info in z.infolist():
-                name = info.filename or ""
-                if name.endswith("/") or name.endswith("\\"):
-                    continue
-                norm = name.replace("\\", "/")
-                parts = [p for p in norm.split("/") if p and p not in (".", "..")]
-                if not parts:
-                    skipped += 1
-                    continue
-                out_rel = _sanitize_relpath("/".join(parts))
-                out_path = (dest_dir / out_rel).resolve()
-                try:
-                    out_path.relative_to(dest_dir.resolve())
-                except Exception:
-                    skipped += 1
-                    continue
-                if out_path.suffix.lower() not in allowed:
-                    skipped += 1
-                    continue
-                out_path.parent.mkdir(parents=True, exist_ok=True)
-                out_path = _unique_dest(out_path)
-                with z.open(info) as srcf, open(out_path, "wb") as dstf:
-                    shutil.copyfileobj(srcf, dstf)
-                extracted += 1
-        return {"extracted": extracted, "skipped": skipped}
-
-    def wants_json():
-        return request.headers.get("X-Upload-Mode") == "queue" or "application/json" in (request.headers.get("Accept") or "")
-
     if request.method == "POST":
-        files = request.files.getlist("files")
-        relpaths = request.form.getlist("relpaths")
-
-        if not files:
-            one = request.files.get("file")
-            if one and one.filename:
-                files = [one]
-                relpaths = [one.filename]
-
-        if not files:
-            if wants_json():
-                return jsonify({"ok": False, "message": "No files selected."}), 400
-            message = "No files selected."
-            return render_template("upload.html", message=message)
-
-        LIB_DIR.mkdir(parents=True, exist_ok=True)
-
-        saved = 0
-        extracted_total = 0
-        skipped_total = 0
-        rejected = 0
-        saved_files = []
-
-        for i, f in enumerate(files):
-            if not f or not f.filename:
-                continue
-            rp = relpaths[i] if i < len(relpaths) else f.filename
-            rel = _sanitize_relpath(rp)
-            dest = (LIB_DIR / rel)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest = _unique_dest(dest)
-
-            ext = dest.suffix.lower()
-            if ext not in {".pdf", ".txt", ".md", ".zip", ".doc", ".docx"}:
-                rejected += 1
-                continue
-
-            f.save(dest)
-            saved += 1
-            saved_files.append(str(dest.relative_to(LIB_DIR)).replace("\\", "/"))
-
-            if ext == ".zip":
-                res = safe_extract_zip(dest, LIB_DIR)
-                extracted_total += res["extracted"]
-                skipped_total += res["skipped"]
-                try:
-                    dest.unlink(missing_ok=True)
-                except Exception:
-                    pass
-
-        write_library_manifest()
-        schedule_reindex(delay_seconds=3)
-
-        payload = {
-            "ok": True,
-            "uploaded": saved,
-            "zip_extracted": extracted_total,
-            "zip_skipped": skipped_total,
-            "rejected": rejected,
-            "saved_files": saved_files[:25],
-            "message": f"Uploaded {saved}. ZIP extracted {extracted_total} (skipped {skipped_total}). Rejected {rejected}. Reindex queued.",
-        }
-        if wants_json():
-            return jsonify(payload)
-
-        message = payload["message"]
-
+        f = request.files.get("file")
+        if not f or not f.filename:
+            message = "No file selected."
+        else:
+            name = os.path.basename(f.filename)
+            # basic extension allow-list
+            ext = Path(name).suffix.lower()
+            allowed = {".pdf", ".txt", ".md"}
+            if ext not in allowed:
+                message = "Unsupported file type. Allowed: PDF, TXT, MD."
+            else:
+                # sanitize filename
+                safe = re.sub(r"[^a-zA-Z0-9._ -]+", "_", name).strip().replace("..", ".")
+                if not safe:
+                    safe = f"upload_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}{ext}"
+                dest = LIB_DIR / safe
+                # avoid overwrite by adding suffix
+                if dest.exists():
+                    stem = dest.stem
+                    for i in range(1, 1000):
+                        candidate = LIB_DIR / f"{stem}_{i}{ext}"
+                        if not candidate.exists():
+                            dest = candidate
+                            break
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                f.save(dest)
+                # Reindex after upload
+                summary = index_library(use_cleaner=DEFAULT_USE_CLEANER)
+                message = f"Uploaded to {dest.name}. Reindex complete: +{summary['inserted']} new, {summary['updated']} updated."
     return render_template("upload.html", message=message)
 
