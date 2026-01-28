@@ -1063,6 +1063,59 @@ def _safe_relpath(relpath: str) -> str:
     relpath = "/".join([p for p in relpath.split("/") if p not in ("", ".", "..")])
     return relpath
 
+# ---- Compatibility routes -------------------------------------------------
+# Some older templates / buttons may hit /reindex or /reindex_library via GET.
+# Provide a small helper page that triggers the real POST endpoint (/api/reindex).
+
+@app.get("/reindex")
+@app.get("/reindex_library")
+@login_required
+def reindex_library_get():
+    # Auto-trigger reindex via POST, then show the result.
+    return (
+        """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Reindex Library</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;max-width:900px;margin:40px auto;padding:0 16px}
+    pre{white-space:pre-wrap;word-break:break-word;background:#111;color:#eee;padding:16px;border-radius:12px}
+    .muted{opacity:.75}
+  </style>
+</head>
+<body>
+  <h1>Reindexing library…</h1>
+  <p class="muted">This page exists for compatibility. It will call <code>/api/reindex</code> now.</p>
+  <pre id="out">Starting…</pre>
+<script>
+(async () => {
+  const out = document.getElementById('out');
+  try {
+    const r = await fetch('/api/reindex', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({})});
+    const t = await r.text();
+    out.textContent = t;
+  } catch (e) {
+    out.textContent = 'Failed: ' + (e && e.message ? e.message : e);
+  }
+})();
+</script>
+</body>
+</html>""",
+        200,
+        {"Content-Type": "text/html; charset=utf-8"},
+    )
+
+@app.post("/reindex")
+@app.post("/reindex_library")
+@login_required
+def reindex_library_post():
+    # Alias to the canonical endpoint.
+    return api_reindex()
+
+
+
 @app.post("/api/upload/init")
 def api_upload_init():
     """Start a resumable upload session.
