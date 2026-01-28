@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import shutil
 import zipfile
@@ -17,7 +19,6 @@ Features:
 - Login / password wall to protect the whole portal
 """
 
-from __future__ import annotations
 import os, re, sqlite3, unicodedata
 from datetime import datetime
 from pathlib import Path
