@@ -1,3 +1,6 @@
+import zipfile
+import shutil
+import threading
 #!/usr/bin/env python3
 """
 Spellcaster Web Portal — Cohen Edition (with login)
@@ -14,14 +17,15 @@ Features:
 """
 
 from __future__ import annotations
-import os, re, sqlite3, unicodedata, zipfile, shutil, tempfile
+import os, re, sqlite3, unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
 
 from functools import wraps
 from flask import (
-    Flask,
+
+from werkzeug.exceptions import RequestEntityTooLarge    Flask,
     request,
     jsonify,
     send_from_directory,
@@ -54,6 +58,37 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 LIB_DIR = BASE_DIR / "library"
 DB_PATH = BASE_DIR / "spellcaster.db"
 LIB_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# ---- Background reindex (debounced) ----
+REINDEX_STATUS = {"running": False, "message": "Idle"}
+_REINDEX_TIMER = None
+_REINDEX_LOCK = threading.Lock()
+
+def _run_reindex_job():
+    REINDEX_STATUS["running"] = True
+    REINDEX_STATUS["message"] = "Reindexing…"
+    try:
+        summary = index_library(use_cleaner=DEFAULT_USE_CLEANER)
+        REINDEX_STATUS["message"] = f"Done. +{summary['inserted']} new, {summary['updated']} updated (total {summary['total_docs']})."
+    except Exception as e:
+        REINDEX_STATUS["message"] = f"Reindex failed: {e}"
+    finally:
+        REINDEX_STATUS["running"] = False
+
+def schedule_reindex(delay_seconds: int = 3):
+    """Debounce reindex so multiple uploads trigger only one index run."""
+    global _REINDEX_TIMER
+    with _REINDEX_LOCK:
+        if _REINDEX_TIMER is not None:
+            try:
+                _REINDEX_TIMER.cancel()
+            except Exception:
+                pass
+        REINDEX_STATUS["message"] = f"Queued reindex… (starts in {delay_seconds}s)"
+        _REINDEX_TIMER = threading.Timer(delay_seconds, _run_reindex_job)
+        _REINDEX_TIMER.daemon = True
+        _REINDEX_TIMER.start()
 
 DEFAULT_USE_CLEANER = True
 DEFAULT_LIKE_FALLBACK = True
@@ -397,6 +432,13 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
 )
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def handle_413(e):
+    mb = int(os.getenv("MAX_UPLOAD_MB", "75"))
+    return render_template("upload.html", message=f"Upload too large (413). Current limit is {mb} MB. Split into smaller ZIPs or raise MAX_UPLOAD_MB on Render."), 413
+
 
 # ---- Auth helpers ---------------------------------------------------------
 
@@ -2219,188 +2261,135 @@ if __name__ == "__main__":
 
 
 
+
+
+@app.route("/reindex_status")
+@login_required
+def reindex_status():
+    return jsonify(REINDEX_STATUS)
+
+@app.route("/scan_library", methods=["POST"])
+@login_required
+def scan_library():
+    schedule_reindex(delay_seconds=1)
+    return "Reindex queued. You can keep uploading; it will run after uploads settle."
 @app.route("/upload", methods=["GET", "POST"])
 @login_required
 def upload():
     """
-    Upload books into the library folder (stored under DATA_DIR).
-
-    Supports:
-      - Multiple .pdf/.txt/.md files in one request
-      - .zip archives containing those files (safely extracted)
+    Upload PDFs/TXT/MD plus ZIP bundles.
+    Supports multi-file uploads and folder uploads (browser supplies relpaths).
+    Reindex runs in the background (debounced) to avoid request timeouts.
     """
     message = None
 
-    allowed_docs = {".pdf", ".txt", ".md"}
-    allowed_all  = allowed_docs | {".zip"}
+    def _sanitize_relpath(p: str) -> Path:
+        p = (p or "").replace("\\", "/")
+        parts = [x for x in p.split("/") if x and x not in (".", "..")]
+        safe_parts = [re.sub(r"[^a-zA-Z0-9._ -]+", "_", x).strip() for x in parts]
+        safe_parts = [x for x in safe_parts if x]
+        return Path(*safe_parts) if safe_parts else Path("upload.bin")
 
-    def sanitize_filename(name: str, fallback_ext: str = "") -> str:
-        name = os.path.basename(name or "").strip()
-        if not name:
-            return f"upload_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}{fallback_ext}"
-        # keep simple, cross-platform safe
-        name = re.sub(r"[^a-zA-Z0-9._ -]+", "_", name).strip()
-        name = name.replace("..", ".")
-        if not name:
-            return f"upload_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}{fallback_ext}"
-        return name
-
-    def unique_path(dest: Path) -> Path:
+    def _unique_dest(dest: Path) -> Path:
         if not dest.exists():
             return dest
-        stem, ext = dest.stem, dest.suffix
-        for i in range(1, 10_000):
-            cand = dest.with_name(f"{stem}_{i}{ext}")
+        stem = dest.stem
+        ext = dest.suffix
+        for i in range(1, 10000):
+            cand = dest.parent / f"{stem}_{i}{ext}"
             if not cand.exists():
                 return cand
-        # worst case
-        return dest.with_name(f"{stem}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}{ext}")
+        return dest
 
-    def safe_extract_zip(zip_path: Path, out_dir: Path) -> Dict[str, int]:
-        """
-        Extract allowed files from zip into out_dir safely:
-          - blocks absolute paths and .. traversal
-          - blocks backslash traversal
-          - enforces basic limits to reduce zip-bomb risk
-        """
-        out_dir.mkdir(parents=True, exist_ok=True)
-
+    def safe_extract_zip(zip_path: Path, dest_dir: Path) -> dict:
         extracted = 0
         skipped = 0
-
-        max_files = int(os.getenv("ZIP_MAX_FILES", "5000"))
-        max_total_uncompressed = int(os.getenv("ZIP_MAX_UNCOMPRESSED_MB", "400")) * 1024 * 1024
-
-        total_uncompressed = 0
-        file_seen = 0
-
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            infos = zf.infolist()
-            for info in infos:
-                file_seen += 1
-                if file_seen > max_files:
+        allowed = {".pdf", ".txt", ".md", ".doc", ".docx"}
+        with zipfile.ZipFile(zip_path, "r") as z:
+            for info in z.infolist():
+                name = info.filename or ""
+                if name.endswith("/") or name.endswith("\\"):
+                    continue
+                norm = name.replace("\\", "/")
+                parts = [p for p in norm.split("/") if p and p not in (".", "..")]
+                if not parts:
                     skipped += 1
                     continue
-
-                # Normalize: zip spec uses forward slashes, but be defensive about backslashes
-                name = (info.filename or "").replace("\\", "/")
-
-                # skip directories
-                if name.endswith("/"):
-                    continue
-
-                # absolute path or traversal?
-                if name.startswith("/") or name.startswith("\\"):
-                    skipped += 1
-                    continue
-                parts = [p for p in name.split("/") if p not in ("", ".",)]
-                if any(p == ".." for p in parts):
-                    skipped += 1
-                    continue
-
-                ext = Path(parts[-1]).suffix.lower()
-                if ext not in allowed_docs:
-                    skipped += 1
-                    continue
-
-                # zip bomb guard
-                total_uncompressed += int(getattr(info, "file_size", 0) or 0)
-                if total_uncompressed > max_total_uncompressed:
-                    skipped += 1
-                    continue
-
-                # sanitize each path part
-                safe_parts = [re.sub(r"[^a-zA-Z0-9._ -]+", "_", p).strip().replace("..", ".") for p in parts]
-                safe_parts = [p for p in safe_parts if p]
-                if not safe_parts:
-                    skipped += 1
-                    continue
-
-                rel = Path(*safe_parts)
-                dest = (out_dir / rel).resolve()
+                out_rel = _sanitize_relpath("/".join(parts))
+                out_path = (dest_dir / out_rel).resolve()
                 try:
-                    dest.relative_to(out_dir.resolve())
+                    out_path.relative_to(dest_dir.resolve())
                 except Exception:
                     skipped += 1
                     continue
-
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest = unique_path(dest)
-
-                with zf.open(info, "r") as src_f, open(dest, "wb") as out_f:
-                    shutil.copyfileobj(src_f, out_f)
-
+                if out_path.suffix.lower() not in allowed:
+                    skipped += 1
+                    continue
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                out_path = _unique_dest(out_path)
+                with z.open(info) as src, open(out_path, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
                 extracted += 1
-
         return {"extracted": extracted, "skipped": skipped}
 
     if request.method == "POST":
-        # Support multi-file name="files" and fallback to legacy name="file"
         files = request.files.getlist("files")
-        if not files:
-            legacy = request.files.get("file")
-            if legacy:
-                files = [legacy]
+        relpaths = request.form.getlist("relpaths")
 
-        if not files or all((not f or not f.filename) for f in files):
+        # backward compat: older template used "file"
+        if not files:
+            one = request.files.get("file")
+            if one and one.filename:
+                files = [one]
+                relpaths = [one.filename]
+
+        if not files:
             message = "No files selected."
             return render_template("upload.html", message=message)
 
-        uploads_saved = 0
-        zips_saved = 0
-        zip_extracted = 0
-        zip_skipped = 0
+        LIB_DIR.mkdir(parents=True, exist_ok=True)
 
-        # Where we store zip contents
-        imports_root = LIB_DIR / "imports"
-        imports_root.mkdir(parents=True, exist_ok=True)
+        saved = 0
+        extracted_total = 0
+        skipped_total = 0
+        rejected = 0
 
-        for f in files:
+        for i, f in enumerate(files):
             if not f or not f.filename:
                 continue
 
-            original_name = sanitize_filename(f.filename)
-            ext = Path(original_name).suffix.lower()
-            if ext not in allowed_all:
-                message = f"Unsupported file type: {original_name}\nAllowed: PDF, TXT, MD, ZIP."
+            rp = relpaths[i] if i < len(relpaths) else f.filename
+            rel = _sanitize_relpath(rp)
+            dest = (LIB_DIR / rel)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest = _unique_dest(dest)
+
+            ext = dest.suffix.lower()
+            if ext not in {".pdf", ".txt", ".md", ".zip", ".doc", ".docx"}:
+                rejected += 1
                 continue
 
+            f.save(dest)
+            saved += 1
+
             if ext == ".zip":
-                # Save zip in a subfolder
-                stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-                zip_base = sanitize_filename(Path(original_name).stem, "")
-                zip_store_dir = imports_root / "_zips"
-                zip_store_dir.mkdir(parents=True, exist_ok=True)
-                zip_dest = unique_path(zip_store_dir / f"{zip_base}_{stamp}.zip")
-                f.save(zip_dest)
-                zips_saved += 1
+                res = safe_extract_zip(dest, LIB_DIR)
+                extracted_total += res["extracted"]
+                skipped_total += res["skipped"]
+                try:
+                    dest.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
-                # Extract under imports/<zip_base>_<stamp>/
-                out_dir = imports_root / f"{zip_base}_{stamp}"
-                stats = safe_extract_zip(zip_dest, out_dir)
-                zip_extracted += stats["extracted"]
-                zip_skipped += stats["skipped"]
-            else:
-                # Save into LIB_DIR root (flat) by default
-                safe_name = sanitize_filename(original_name, ext)
-                dest = unique_path(LIB_DIR / safe_name)
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                f.save(dest)
-                uploads_saved += 1
+        schedule_reindex(delay_seconds=3)
 
-        # Reindex once at end
-        summary = index_library(use_cleaner=DEFAULT_USE_CLEANER)
-
-        message_lines = []
-        message_lines.append(f"Uploads saved: {uploads_saved} file(s)")
-        message_lines.append(f"ZIPs saved: {zips_saved} file(s)")
-        if zips_saved:
-            message_lines.append(f"ZIP extracted: {zip_extracted} file(s)")
-            if zip_skipped:
-                message_lines.append(f"ZIP skipped: {zip_skipped} item(s) (unsupported/path blocked/limits)")
-        message_lines.append(
-            f"Reindex complete: +{summary['inserted']} new, {summary['updated']} updated, -{summary['removed']} removed."
-        )
-        message = "\n".join(message_lines)
+        parts = [f"Uploaded: {saved}"]
+        if extracted_total or skipped_total:
+            parts.append(f"ZIP extracted: {extracted_total} (skipped {skipped_total})")
+        if rejected:
+            parts.append(f"Rejected: {rejected}")
+        parts.append("Reindex queued in background.")
+        message = " • ".join(parts)
 
     return render_template("upload.html", message=message)
+

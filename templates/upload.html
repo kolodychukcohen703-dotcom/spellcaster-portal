@@ -2,117 +2,148 @@
 {% block content %}
   <h2>Upload books</h2>
   <p>
-    Allowed: <strong>.pdf</strong>, <strong>.txt</strong>, <strong>.md</strong>, and <strong>.zip</strong> (containing those files).
-    You can select multiple files at once. After upload, the Portal will reindex the library.
+    Allowed: <strong>.pdf</strong>, <strong>.txt</strong>, <strong>.md</strong>, <strong>.zip</strong> (and you can also store <strong>.doc/.docx</strong>).
+    You can select <em>multiple files</em> or upload an entire <em>folder</em> at once.
+  </p>
+  <p style="opacity:.85; font-size:.95rem;">
+    Note: parsing/indexing is best for PDF/TXT/MD. DOC/DOCX can be stored; DOCX parsing may require extra support depending on your build.
   </p>
 
   {% if message %}
-    <article style="white-space: pre-wrap;">{{ message }}</article>
+    <article>{{ message }}</article>
   {% endif %}
 
-  <form id="uploadForm" method="post" enctype="multipart/form-data">
-    <label style="display:block; margin: 0.75rem 0;">
-      Select files (multi-select supported)
-      <input id="fileInput" type="file" name="files" accept=".pdf,.txt,.md,.zip" multiple required>
-    </label>
+  <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-end;">
+    <form id="uploadFilesForm" method="post" enctype="multipart/form-data" style="min-width:320px;">
+      <label style="display:block; margin-bottom:.35rem;">
+        Select files (multi-select)
+        <input id="fileInput" type="file" name="files" accept=".pdf,.txt,.md,.zip,.doc,.docx" multiple>
+      </label>
+      <button id="btnFiles" type="submit">Upload selection</button>
+    </form>
 
-    <div id="fileList" style="font-size: 0.95rem; opacity: 0.9;"></div>
+    <form id="uploadFolderForm" method="post" enctype="multipart/form-data" style="min-width:320px;">
+      <label style="display:block; margin-bottom:.35rem;">
+        Select a folder (uploads all files inside)
+        <input id="folderInput" type="file" name="files" webkitdirectory directory multiple>
+      </label>
+      <button id="btnFolder" type="submit">Upload folder</button>
+    </form>
+  </div>
 
-    <div style="margin: 0.75rem 0;">
-      <progress id="progressBar" value="0" max="100" style="width: min(520px, 90vw); height: 18px;"></progress>
-      <div id="progressText" style="margin-top: 0.35rem; font-size: 0.95rem; opacity: 0.9;"></div>
+  <div id="fileList" style="margin:.75rem 0; font-size:.95rem; opacity:.92;"></div>
+
+  <div style="margin:.75rem 0;">
+    <div style="height:10px; background: rgba(255,255,255,0.12); border-radius:999px; overflow:hidden;">
+      <div id="bar" style="height:10px; width:0%; background: rgba(124,58,237,0.9);"></div>
     </div>
+    <div id="status" style="margin-top:.35rem; font-size:.9rem; opacity:.9;">Waiting…</div>
+    <div id="reindex" style="margin-top:.35rem; font-size:.9rem; opacity:.85;"></div>
+  </div>
 
-    <button id="uploadBtn" type="submit">Upload + Reindex</button>
-    <span id="spinner" style="display:none; margin-left: .6rem; opacity: 0.9;">Processing…</span>
-  </form>
+  <div style="display:flex; gap:.75rem; flex-wrap:wrap;">
+    <button id="btnReindex" type="button">Reindex library now</button>
+    <a href="/home_hub">Back to Home Hub</a>
+  </div>
 
-  <script>
-    (function() {
-      const form = document.getElementById("uploadForm");
-      const input = document.getElementById("fileInput");
-      const fileList = document.getElementById("fileList");
-      const bar = document.getElementById("progressBar");
-      const text = document.getElementById("progressText");
-      const btn = document.getElementById("uploadBtn");
-      const spinner = document.getElementById("spinner");
+<script>
+(function(){
+  const fileForm = document.getElementById('uploadFilesForm');
+  const folderForm = document.getElementById('uploadFolderForm');
+  const fileInput = document.getElementById('fileInput');
+  const folderInput = document.getElementById('folderInput');
+  const list = document.getElementById('fileList');
+  const bar = document.getElementById('bar');
+  const status = document.getElementById('status');
+  const reindex = document.getElementById('reindex');
+  const btnFiles = document.getElementById('btnFiles');
+  const btnFolder = document.getElementById('btnFolder');
+  const btnReindex = document.getElementById('btnReindex');
 
-      function fmtBytes(n) {
-        if (!Number.isFinite(n)) return "";
-        const units = ["B","KB","MB","GB"];
-        let u = 0;
-        while (n >= 1024 && u < units.length - 1) { n /= 1024; u++; }
-        return n.toFixed(u === 0 ? 0 : 1) + " " + units[u];
-      }
+  function fmtBytes(n){
+    const units=['B','KB','MB','GB']; let i=0; let x=n;
+    while(x>=1024 && i<units.length-1){ x/=1024; i++; }
+    return x.toFixed(i===0?0:1)+' '+units[i];
+  }
 
-      function refreshList() {
-        const files = Array.from(input.files || []);
-        if (!files.length) {
-          fileList.textContent = "";
-          return;
+  function describeFiles(files){
+    if(!files.length){ list.textContent=''; return; }
+    const total = files.reduce((a,f)=>a+f.size,0);
+    list.innerHTML = `<strong>Selected:</strong> ${files.length} files • <strong>Total:</strong> ${fmtBytes(total)}`;
+  }
+
+  function upload(files, buttonsToDisable){
+    if(!files.length){ status.textContent='No files selected.'; return; }
+    describeFiles(files);
+
+    const data = new FormData();
+    for(const f of files){
+      data.append('files', f, f.name);
+      data.append('relpaths', f.webkitRelativePath || f.name);
+    }
+
+    buttonsToDisable.forEach(b => b.disabled = true);
+    status.textContent='Uploading…';
+    reindex.textContent='';
+    bar.style.width='0%';
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/upload', true);
+
+    xhr.upload.addEventListener('progress', (evt) => {
+      if(!evt.lengthComputable) return;
+      const pct = Math.floor((evt.loaded/evt.total)*100);
+      bar.style.width = pct + '%';
+      status.textContent = `Uploading… ${pct}% (${fmtBytes(evt.loaded)} / ${fmtBytes(evt.total)})`;
+    });
+
+    xhr.onreadystatechange = () => {
+      if(xhr.readyState === 4){
+        buttonsToDisable.forEach(b => b.disabled = false);
+        if(xhr.status >= 200 && xhr.status < 300){
+          status.textContent = 'Upload complete. Server is extracting/queuing reindex…';
+          setTimeout(()=>window.location.reload(), 800);
+        } else if(xhr.status === 413){
+          status.textContent = 'Upload too large (413). Split into smaller ZIPs or increase MAX_UPLOAD_MB on Render.';
+        } else {
+          status.textContent = 'Upload failed ('+xhr.status+'). Check Render logs.';
         }
-        const total = files.reduce((a,f)=>a + (f.size||0), 0);
-        const lines = files.slice(0, 25).map(f => `• ${f.name} (${fmtBytes(f.size||0)})`);
-        if (files.length > 25) lines.push(`…and ${files.length - 25} more`);
-        lines.push(`Total: ${files.length} file(s), ${fmtBytes(total)}`);
-        fileList.textContent = lines.join("\n");
       }
+    };
 
-      input.addEventListener("change", () => {
-        bar.value = 0;
-        text.textContent = "";
-        refreshList();
-      });
+    xhr.send(data);
+  }
 
-      form.addEventListener("submit", (e) => {
-        // Use XHR so we can show upload progress.
-        e.preventDefault();
+  fileInput.addEventListener('change', ()=>describeFiles(Array.from(fileInput.files||[])));
+  folderInput.addEventListener('change', ()=>describeFiles(Array.from(folderInput.files||[])));
 
-        const files = Array.from(input.files || []);
-        if (!files.length) return;
+  fileForm.addEventListener('submit', (e)=>{ e.preventDefault(); upload(Array.from(fileInput.files||[]), [btnFiles, btnFolder, btnReindex]); });
+  folderForm.addEventListener('submit', (e)=>{ e.preventDefault(); upload(Array.from(folderInput.files||[]), [btnFiles, btnFolder, btnReindex]); });
 
-        bar.value = 0;
-        text.textContent = "Starting upload…";
-        btn.disabled = true;
-        spinner.style.display = "none";
+  btnReindex.addEventListener('click', async ()=>{
+    btnReindex.disabled = true;
+    reindex.textContent = 'Starting reindex…';
+    try{
+      const r = await fetch('/scan_library', {method:'POST'});
+      const t = await r.text();
+      reindex.textContent = t;
+    }catch(e){
+      reindex.textContent = 'Failed to start reindex.';
+    }finally{
+      btnReindex.disabled = false;
+    }
+  });
 
-        const fd = new FormData();
-        files.forEach(f => fd.append("files", f, f.name));
-
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", window.location.href, true);
-
-        xhr.upload.onprogress = (evt) => {
-          if (!evt.lengthComputable) return;
-          const pct = Math.round((evt.loaded / evt.total) * 100);
-          bar.value = pct;
-          text.textContent = `Uploading… ${pct}% (${fmtBytes(evt.loaded)} / ${fmtBytes(evt.total)})`;
-        };
-
-        xhr.onload = () => {
-          // Upload finished, server may still be extracting + reindexing.
-          bar.value = 100;
-          spinner.style.display = "inline";
-          text.textContent = "Upload complete. Processing (extracting/reindexing)…";
-          // Replace page with the HTML response so you see the message.
-          document.open();
-          document.write(xhr.responseText);
-          document.close();
-        };
-
-        xhr.onerror = () => {
-          btn.disabled = false;
-          spinner.style.display = "none";
-          text.textContent = "Upload failed (network error). Try again.";
-        };
-
-        xhr.send(fd);
-      });
-
-      refreshList();
-    })();
-  </script>
-
-  <hr>
-  <p><a href="/home_hub">Back to Home Hub</a></p>
+  async function poll(){
+    try{
+      const r = await fetch('/reindex_status', {cache:'no-store'});
+      if(!r.ok) return;
+      const j = await r.json();
+      reindex.textContent = j.message || '';
+    }catch(e){}
+  }
+  setInterval(poll, 1500);
+  poll();
+})();
+</script>
 {% endblock %}
