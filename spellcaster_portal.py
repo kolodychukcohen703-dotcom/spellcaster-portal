@@ -25,7 +25,6 @@ from typing import List, Dict, Optional
 
 from functools import wraps
 from flask import (
-from werkzeug.exceptions import RequestEntityTooLarge
     Flask,
     request,
     jsonify,
@@ -37,6 +36,7 @@ from werkzeug.exceptions import RequestEntityTooLarge
     url_for,
     render_template,
 )
+from werkzeug.exceptions import RequestEntityTooLarge
 
 
 import openai
