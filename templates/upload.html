@@ -1,149 +1,269 @@
 {% extends "base.html" %}
 {% block content %}
-  <h2>Upload books</h2>
-  <p>
-    Allowed: <strong>.pdf</strong>, <strong>.txt</strong>, <strong>.md</strong>, <strong>.zip</strong> (and you can also store <strong>.doc/.docx</strong>).
-    You can select <em>multiple files</em> or upload an entire <em>folder</em> at once.
-  </p>
-  <p style="opacity:.85; font-size:.95rem;">
-    Note: parsing/indexing is best for PDF/TXT/MD. DOC/DOCX can be stored; DOCX parsing may require extra support depending on your build.
-  </p>
+<h2>Upload books</h2>
 
-  {% if message %}
-    <article>{{ message }}</article>
-  {% endif %}
+<p style="opacity:.9">
+  Drag & drop files or folders, or choose them below. You’ll see a per‑file queue like Windows copy.
+  <br><strong>Note:</strong> multi‑GB single uploads are unreliable. Upload in batches (ZIP subfolders).
+</p>
 
-  <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-end;">
-    <form id="uploadFilesForm" method="post" enctype="multipart/form-data" style="min-width:320px;">
-      <label style="display:block; margin-bottom:.35rem;">
-        Select files (multi-select)
-        <input id="fileInput" type="file" name="files" accept=".pdf,.txt,.md,.zip,.doc,.docx" multiple>
-      </label>
-      <button id="btnFiles" type="submit">Upload selection</button>
-    </form>
+{% if message %}
+  <article>{{ message }}</article>
+{% endif %}
 
-    <form id="uploadFolderForm" method="post" enctype="multipart/form-data" style="min-width:320px;">
-      <label style="display:block; margin-bottom:.35rem;">
-        Select a folder (uploads all files inside)
-        <input id="folderInput" type="file" name="files" webkitdirectory directory multiple>
-      </label>
-      <button id="btnFolder" type="submit">Upload folder</button>
-    </form>
-  </div>
+<div id="dropZone" style="border:2px dashed rgba(255,255,255,.25);border-radius:16px;padding:16px;margin:12px 0;text-align:center;background:rgba(255,255,255,.04);">
+  <div style="font-size:1.05rem;margin-bottom:6px;">Drag & drop files or folders here</div>
+  <div style="opacity:.8;font-size:.95rem;">…or choose files / a folder below.</div>
+</div>
 
-  <div id="fileList" style="margin:.75rem 0; font-size:.95rem; opacity:.92;"></div>
+<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+  <label style="display:block;">Select files
+    <input id="filePicker" type="file" multiple accept=".pdf,.txt,.md,.zip,.doc,.docx">
+  </label>
 
-  <div style="margin:.75rem 0;">
-    <div style="height:10px; background: rgba(255,255,255,0.12); border-radius:999px; overflow:hidden;">
-      <div id="bar" style="height:10px; width:0%; background: rgba(124,58,237,0.9);"></div>
+  <label style="display:block;">Select a folder
+    <input id="folderPicker" type="file" webkitdirectory directory multiple>
+  </label>
+
+  <button id="btnStart" type="button">Start upload</button>
+  <button id="btnStop" type="button" disabled>Stop</button>
+  <button id="btnClear" type="button">Clear</button>
+  <button id="btnReindex" type="button">Reindex library now</button>
+
+  <a href="/library_manifest" style="margin-left:auto;">Download library manifest</a>
+</div>
+
+<div style="margin-top:12px;">
+  <div style="font-size:.95rem;opacity:.9" id="summaryLine">No files queued.</div>
+
+  <div style="margin-top:8px;">
+    <div style="height:10px;background:rgba(255,255,255,0.12);border-radius:999px;overflow:hidden;">
+      <div id="overallBar" style="height:10px;width:0%;background:rgba(124,58,237,0.9);"></div>
     </div>
-    <div id="status" style="margin-top:.35rem; font-size:.9rem; opacity:.9;">Waiting…</div>
-    <div id="reindex" style="margin-top:.35rem; font-size:.9rem; opacity:.85;"></div>
+    <div id="overallStatus" style="margin-top:.35rem;font-size:.9rem;opacity:.9;">Waiting…</div>
+    <div id="reindexStatus" style="margin-top:.35rem;font-size:.9rem;opacity:.85;"></div>
   </div>
+</div>
 
-  <div style="display:flex; gap:.75rem; flex-wrap:wrap;">
-    <button id="btnReindex" type="button">Reindex library now</button>
-    <a href="/home_hub">Back to Home Hub</a>
-  </div>
+<div style="margin-top:12px;max-height:420px;overflow:auto;border:1px solid rgba(255,255,255,.12);border-radius:14px;">
+  <table style="width:100%;border-collapse:collapse;">
+    <thead style="position:sticky;top:0;background:rgba(0,0,0,.35);backdrop-filter:blur(6px);">
+      <tr>
+        <th style="text-align:left;padding:10px;border-bottom:1px solid rgba(255,255,255,.12);">File</th>
+        <th style="text-align:right;padding:10px;border-bottom:1px solid rgba(255,255,255,.12);width:110px;">Size</th>
+        <th style="text-align:left;padding:10px;border-bottom:1px solid rgba(255,255,255,.12);width:170px;">Status</th>
+        <th style="text-align:left;padding:10px;border-bottom:1px solid rgba(255,255,255,.12);width:200px;">Progress</th>
+      </tr>
+    </thead>
+    <tbody id="queueBody"></tbody>
+  </table>
+</div>
 
 <script>
 (function(){
-  const fileForm = document.getElementById('uploadFilesForm');
-  const folderForm = document.getElementById('uploadFolderForm');
-  const fileInput = document.getElementById('fileInput');
-  const folderInput = document.getElementById('folderInput');
-  const list = document.getElementById('fileList');
-  const bar = document.getElementById('bar');
-  const status = document.getElementById('status');
-  const reindex = document.getElementById('reindex');
-  const btnFiles = document.getElementById('btnFiles');
-  const btnFolder = document.getElementById('btnFolder');
+  const dropZone = document.getElementById('dropZone');
+  const filePicker = document.getElementById('filePicker');
+  const folderPicker = document.getElementById('folderPicker');
+  const btnStart = document.getElementById('btnStart');
+  const btnStop = document.getElementById('btnStop');
+  const btnClear = document.getElementById('btnClear');
   const btnReindex = document.getElementById('btnReindex');
+  const summaryLine = document.getElementById('summaryLine');
+  const overallBar = document.getElementById('overallBar');
+  const overallStatus = document.getElementById('overallStatus');
+  const reindexStatus = document.getElementById('reindexStatus');
+  const queueBody = document.getElementById('queueBody');
+
+  let queue = [];
+  let running = false;
+  let stopRequested = false;
+  let totalBytes = 0;
+  let sentBytes = 0;
+  let okCount = 0;
+  let failCount = 0;
 
   function fmtBytes(n){
-    const units=['B','KB','MB','GB']; let i=0; let x=n;
+    const units=['B','KB','MB','GB','TB']; let i=0; let x=n;
     while(x>=1024 && i<units.length-1){ x/=1024; i++; }
     return x.toFixed(i===0?0:1)+' '+units[i];
   }
 
-  function describeFiles(files){
-    if(!files.length){ list.textContent=''; return; }
-    const total = files.reduce((a,f)=>a+f.size,0);
-    list.innerHTML = `<strong>Selected:</strong> ${files.length} files • <strong>Total:</strong> ${fmtBytes(total)}`;
+  function updateSummary(){
+    if(queue.length === 0){
+      summaryLine.textContent = "No files queued.";
+      overallStatus.textContent = "Waiting…";
+      overallBar.style.width = "0%";
+      return;
+    }
+    summaryLine.textContent = `Queued: ${queue.length} files • Total: ${fmtBytes(totalBytes)} • Completed: ${okCount} • Failed: ${failCount}`;
+    const pct = totalBytes ? Math.floor((sentBytes / totalBytes) * 100) : 0;
+    overallBar.style.width = pct + "%";
+    overallStatus.textContent = running
+      ? `Uploading… ${pct}% (${fmtBytes(sentBytes)} / ${fmtBytes(totalBytes)})`
+      : `Ready. ${pct}% (${fmtBytes(sentBytes)} / ${fmtBytes(totalBytes)})`;
   }
 
-  function upload(files, buttonsToDisable){
-    if(!files.length){ status.textContent='No files selected.'; return; }
-    describeFiles(files);
-
-    const data = new FormData();
+  function addFiles(fileList){
+    const files = Array.from(fileList || []);
     for(const f of files){
-      data.append('files', f, f.name);
-      data.append('relpaths', f.webkitRelativePath || f.name);
+      const rel = f.webkitRelativePath || f.name;
+      const key = rel + "::" + f.size;
+      if(queue.some(q => (q.rel + "::" + q.size) === key)) continue;
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="padding:10px;border-bottom:1px solid rgba(255,255,255,.08);word-break:break-word;"><span class="fname"></span></td>
+        <td style="padding:10px;border-bottom:1px solid rgba(255,255,255,.08);text-align:right;" class="fsize"></td>
+        <td style="padding:10px;border-bottom:1px solid rgba(255,255,255,.08);" class="fstatus">Queued</td>
+        <td style="padding:10px;border-bottom:1px solid rgba(255,255,255,.08);">
+          <div style="height:8px;background:rgba(255,255,255,0.12);border-radius:999px;overflow:hidden;">
+            <div class="pbar" style="height:8px;width:0%;background:rgba(16,185,129,0.9);"></div>
+          </div>
+        </td>
+      `;
+      tr.querySelector('.fname').textContent = rel;
+      tr.querySelector('.fsize').textContent = fmtBytes(f.size);
+      queueBody.appendChild(tr);
+
+      queue.push({file:f, rel, size:f.size, row:tr, bar:tr.querySelector('.pbar'), statusEl:tr.querySelector('.fstatus')});
+      totalBytes += f.size;
+    }
+    updateSummary();
+  }
+
+  function setRowStatus(item, text, ok=null){
+    item.statusEl.textContent = text;
+    if(ok === true) item.statusEl.style.color = "rgba(16,185,129,.95)";
+    else if(ok === false) item.statusEl.style.color = "rgba(239,68,68,.95)";
+    else item.statusEl.style.color = "";
+  }
+
+  function uploadOne(item){
+    return new Promise((resolve) => {
+      const data = new FormData();
+      data.append('files', item.file, item.file.name);
+      data.append('relpaths', item.rel);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/upload', true);
+      xhr.setRequestHeader('X-Upload-Mode', 'queue');
+      xhr.setRequestHeader('Accept', 'application/json');
+
+      let lastLoaded = 0;
+      xhr.upload.onprogress = (evt) => {
+        if(!evt.lengthComputable) return;
+        const pct = Math.floor((evt.loaded/evt.total)*100);
+        item.bar.style.width = pct + '%';
+        const delta = Math.max(0, evt.loaded - lastLoaded);
+        lastLoaded = evt.loaded;
+        sentBytes += delta;
+        updateSummary();
+      };
+
+      xhr.onreadystatechange = () => {
+        if(xhr.readyState !== 4) return;
+        if(lastLoaded < item.size){
+          sentBytes += (item.size - lastLoaded);
+        }
+        item.bar.style.width = '100%';
+
+        if(xhr.status >= 200 && xhr.status < 300){
+          okCount++;
+          setRowStatus(item, 'Uploaded', true);
+          resolve({ok:true});
+        } else {
+          failCount++;
+          if(xhr.status === 413) setRowStatus(item, 'Too large (413)', false);
+          else setRowStatus(item, `Failed (${xhr.status})`, false);
+          resolve({ok:false});
+        }
+        updateSummary();
+      };
+
+      setRowStatus(item, 'Uploading…');
+      xhr.send(data);
+    });
+  }
+
+  async function runQueue(){
+    if(running) return;
+    if(queue.length === 0){
+      overallStatus.textContent = "No files queued.";
+      return;
+    }
+    running = true;
+    stopRequested = false;
+    btnStart.disabled = true;
+    btnStop.disabled = false;
+    btnClear.disabled = true;
+    btnReindex.disabled = true;
+    updateSummary();
+
+    for(const item of queue){
+      if(stopRequested) break;
+      if(item.statusEl.textContent === 'Uploaded') continue;
+      await uploadOne(item);
     }
 
-    buttonsToDisable.forEach(b => b.disabled = true);
-    status.textContent='Uploading…';
-    reindex.textContent='';
-    bar.style.width='0%';
+    running = false;
+    btnStart.disabled = false;
+    btnStop.disabled = true;
+    btnClear.disabled = false;
+    btnReindex.disabled = false;
 
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/upload', true);
-
-    xhr.upload.addEventListener('progress', (evt) => {
-      if(!evt.lengthComputable) return;
-      const pct = Math.floor((evt.loaded/evt.total)*100);
-      bar.style.width = pct + '%';
-      status.textContent = `Uploading… ${pct}% (${fmtBytes(evt.loaded)} / ${fmtBytes(evt.total)})`;
-    });
-
-    xhr.onreadystatechange = () => {
-      if(xhr.readyState === 4){
-        buttonsToDisable.forEach(b => b.disabled = false);
-        if(xhr.status >= 200 && xhr.status < 300){
-          status.textContent = 'Upload complete. Server is extracting/queuing reindex…';
-          setTimeout(()=>window.location.reload(), 800);
-        } else if(xhr.status === 413){
-          status.textContent = 'Upload too large (413). Split into smaller ZIPs or increase MAX_UPLOAD_MB on Render.';
-        } else {
-          status.textContent = 'Upload failed ('+xhr.status+'). Check Render logs.';
-        }
-      }
-    };
-
-    xhr.send(data);
+    overallStatus.textContent = stopRequested
+      ? "Stopped."
+      : `Done. Uploaded ${okCount}, failed ${failCount}. Reindex will run in background.`;
+    updateSummary();
   }
 
-  fileInput.addEventListener('change', ()=>describeFiles(Array.from(fileInput.files||[])));
-  folderInput.addEventListener('change', ()=>describeFiles(Array.from(folderInput.files||[])));
+  function clearQueue(){
+    if(running) return;
+    queue = [];
+    totalBytes = 0;
+    sentBytes = 0;
+    okCount = 0;
+    failCount = 0;
+    queueBody.innerHTML = "";
+    updateSummary();
+  }
 
-  fileForm.addEventListener('submit', (e)=>{ e.preventDefault(); upload(Array.from(fileInput.files||[]), [btnFiles, btnFolder, btnReindex]); });
-  folderForm.addEventListener('submit', (e)=>{ e.preventDefault(); upload(Array.from(folderInput.files||[]), [btnFiles, btnFolder, btnReindex]); });
+  function prevent(e){ e.preventDefault(); e.stopPropagation(); }
+  ['dragenter','dragover','dragleave','drop'].forEach(ev => dropZone.addEventListener(ev, prevent));
+  ['dragenter','dragover'].forEach(ev => dropZone.addEventListener(ev, ()=>dropZone.style.background='rgba(255,255,255,.07)'));
+  ['dragleave','drop'].forEach(ev => dropZone.addEventListener(ev, ()=>dropZone.style.background='rgba(255,255,255,.04)'));
+  dropZone.addEventListener('drop', (e) => { const dt = e.dataTransfer; if(dt && dt.files) addFiles(dt.files); });
+
+  filePicker.addEventListener('change', ()=> addFiles(filePicker.files));
+  folderPicker.addEventListener('change', ()=> addFiles(folderPicker.files));
+
+  btnStart.addEventListener('click', runQueue);
+  btnStop.addEventListener('click', ()=>{ stopRequested = true; });
+  btnClear.addEventListener('click', clearQueue);
 
   btnReindex.addEventListener('click', async ()=>{
     btnReindex.disabled = true;
-    reindex.textContent = 'Starting reindex…';
     try{
       const r = await fetch('/scan_library', {method:'POST'});
-      const t = await r.text();
-      reindex.textContent = t;
+      reindexStatus.textContent = await r.text();
     }catch(e){
-      reindex.textContent = 'Failed to start reindex.';
+      reindexStatus.textContent = "Failed to start reindex.";
     }finally{
       btnReindex.disabled = false;
     }
   });
 
-  async function poll(){
+  async function pollReindex(){
     try{
       const r = await fetch('/reindex_status', {cache:'no-store'});
       if(!r.ok) return;
       const j = await r.json();
-      reindex.textContent = j.message || '';
+      reindexStatus.textContent = j.message || '';
     }catch(e){}
   }
-  setInterval(poll, 1500);
-  poll();
+  setInterval(pollReindex, 1500);
+  pollReindex();
+  updateSummary();
 })();
 </script>
 {% endblock %}

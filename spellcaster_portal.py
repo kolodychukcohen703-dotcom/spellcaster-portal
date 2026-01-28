@@ -1,3 +1,7 @@
+import json
+import shutil
+import zipfile
+import threading
 #!/usr/bin/env python3
 """
 Spellcaster Web Portal — Cohen Edition (with login)
@@ -20,8 +24,19 @@ from pathlib import Path
 from typing import List, Dict, Optional
 
 from functools import wraps
-from flask import Flask, request, render_template, redirect, url_for, session, jsonify, flash, send_file, send_from_directory, abort, Response, make_response
+from flask import (
 from werkzeug.exceptions import RequestEntityTooLarge
+    Flask,
+    request,
+    jsonify,
+    send_from_directory,
+    Response,
+    abort,
+    session,
+    redirect,
+    url_for,
+    render_template,
+)
 
 
 import openai
@@ -42,6 +57,29 @@ PASSWORD = os.getenv("PORTAL_PASS", "fast5man!@")  # set PORTAL_PASS on Render
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 LIB_DIR = BASE_DIR / "library"
+
+# ---- Library manifest (what's currently in /library) ----
+def write_library_manifest():
+    """Write a JSON manifest of library files so you can see what's been ingested."""
+    try:
+        LIB_DIR.mkdir(parents=True, exist_ok=True)
+        allowed = {".pdf", ".txt", ".md", ".doc", ".docx"}
+        items = []
+        for p in LIB_DIR.rglob("*"):
+            if not p.is_file():
+                continue
+            if p.suffix.lower() not in allowed:
+                continue
+            rel = str(p.relative_to(LIB_DIR)).replace("\\", "/")
+            st = p.stat()
+            items.append({"path": rel, "size": st.st_size, "mtime": int(st.st_mtime)})
+        items.sort(key=lambda x: x["path"].lower())
+        out = {"generated_utc": int(time.time()), "count": len(items), "items": items}
+        (LIB_DIR / "_library_manifest.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
+        return out["count"]
+    except Exception:
+        return None
+
 DB_PATH = BASE_DIR / "spellcaster.db"
 LIB_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -2209,40 +2247,148 @@ if __name__ == "__main__":
 
 
 
+
+
+@app.route("/library_manifest")
+@login_required
+def library_manifest():
+    mf = LIB_DIR / "_library_manifest.json"
+    if not mf.exists():
+        write_library_manifest()
+    if mf.exists():
+        return send_file(mf, as_attachment=True, download_name="library_manifest.json")
+    return jsonify({"ok": False, "message": "Manifest not available yet."}), 404
+
 @app.route("/upload", methods=["GET", "POST"])
 @login_required
 def upload():
-    """Upload PDFs/TXT/MD into the library folder (stored under DATA_DIR)."""
+    """
+    Queue-friendly uploader.
+    - Folder uploads supported via relpaths (webkitRelativePath)
+    - ZIP safe-extract supported
+    - Returns JSON when X-Upload-Mode: queue
+    - Reindex is queued in the background (debounced)
+    """
     message = None
+
+    def _sanitize_relpath(p: str) -> Path:
+        p = (p or "").replace("\\", "/")
+        parts = [x for x in p.split("/") if x and x not in (".", "..")]
+        safe_parts = [re.sub(r"[^a-zA-Z0-9._ -]+", "_", x).strip() for x in parts]
+        safe_parts = [x for x in safe_parts if x]
+        return Path(*safe_parts) if safe_parts else Path("upload.bin")
+
+    def _unique_dest(dest: Path) -> Path:
+        if not dest.exists():
+            return dest
+        stem, ext = dest.stem, dest.suffix
+        for i in range(1, 10000):
+            cand = dest.parent / f"{stem}_{i}{ext}"
+            if not cand.exists():
+                return cand
+        return dest
+
+    def safe_extract_zip(zip_path: Path, dest_dir: Path) -> dict:
+        extracted = 0
+        skipped = 0
+        allowed = {".pdf", ".txt", ".md", ".doc", ".docx"}
+        with zipfile.ZipFile(zip_path, "r") as z:
+            for info in z.infolist():
+                name = info.filename or ""
+                if name.endswith("/") or name.endswith("\\"):
+                    continue
+                norm = name.replace("\\", "/")
+                parts = [p for p in norm.split("/") if p and p not in (".", "..")]
+                if not parts:
+                    skipped += 1
+                    continue
+                out_rel = _sanitize_relpath("/".join(parts))
+                out_path = (dest_dir / out_rel).resolve()
+                try:
+                    out_path.relative_to(dest_dir.resolve())
+                except Exception:
+                    skipped += 1
+                    continue
+                if out_path.suffix.lower() not in allowed:
+                    skipped += 1
+                    continue
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                out_path = _unique_dest(out_path)
+                with z.open(info) as srcf, open(out_path, "wb") as dstf:
+                    shutil.copyfileobj(srcf, dstf)
+                extracted += 1
+        return {"extracted": extracted, "skipped": skipped}
+
+    def wants_json():
+        return request.headers.get("X-Upload-Mode") == "queue" or "application/json" in (request.headers.get("Accept") or "")
+
     if request.method == "POST":
-        f = request.files.get("file")
-        if not f or not f.filename:
-            message = "No file selected."
-        else:
-            name = os.path.basename(f.filename)
-            # basic extension allow-list
-            ext = Path(name).suffix.lower()
-            allowed = {".pdf", ".txt", ".md"}
-            if ext not in allowed:
-                message = "Unsupported file type. Allowed: PDF, TXT, MD."
-            else:
-                # sanitize filename
-                safe = re.sub(r"[^a-zA-Z0-9._ -]+", "_", name).strip().replace("..", ".")
-                if not safe:
-                    safe = f"upload_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}{ext}"
-                dest = LIB_DIR / safe
-                # avoid overwrite by adding suffix
-                if dest.exists():
-                    stem = dest.stem
-                    for i in range(1, 1000):
-                        candidate = LIB_DIR / f"{stem}_{i}{ext}"
-                        if not candidate.exists():
-                            dest = candidate
-                            break
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                f.save(dest)
-                # Reindex after upload
-                summary = index_library(use_cleaner=DEFAULT_USE_CLEANER)
-                message = f"Uploaded to {dest.name}. Reindex complete: +{summary['inserted']} new, {summary['updated']} updated."
+        files = request.files.getlist("files")
+        relpaths = request.form.getlist("relpaths")
+
+        if not files:
+            one = request.files.get("file")
+            if one and one.filename:
+                files = [one]
+                relpaths = [one.filename]
+
+        if not files:
+            if wants_json():
+                return jsonify({"ok": False, "message": "No files selected."}), 400
+            message = "No files selected."
+            return render_template("upload.html", message=message)
+
+        LIB_DIR.mkdir(parents=True, exist_ok=True)
+
+        saved = 0
+        extracted_total = 0
+        skipped_total = 0
+        rejected = 0
+        saved_files = []
+
+        for i, f in enumerate(files):
+            if not f or not f.filename:
+                continue
+            rp = relpaths[i] if i < len(relpaths) else f.filename
+            rel = _sanitize_relpath(rp)
+            dest = (LIB_DIR / rel)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest = _unique_dest(dest)
+
+            ext = dest.suffix.lower()
+            if ext not in {".pdf", ".txt", ".md", ".zip", ".doc", ".docx"}:
+                rejected += 1
+                continue
+
+            f.save(dest)
+            saved += 1
+            saved_files.append(str(dest.relative_to(LIB_DIR)).replace("\\", "/"))
+
+            if ext == ".zip":
+                res = safe_extract_zip(dest, LIB_DIR)
+                extracted_total += res["extracted"]
+                skipped_total += res["skipped"]
+                try:
+                    dest.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+        write_library_manifest()
+        schedule_reindex(delay_seconds=3)
+
+        payload = {
+            "ok": True,
+            "uploaded": saved,
+            "zip_extracted": extracted_total,
+            "zip_skipped": skipped_total,
+            "rejected": rejected,
+            "saved_files": saved_files[:25],
+            "message": f"Uploaded {saved}. ZIP extracted {extracted_total} (skipped {skipped_total}). Rejected {rejected}. Reindex queued.",
+        }
+        if wants_json():
+            return jsonify(payload)
+
+        message = payload["message"]
+
     return render_template("upload.html", message=message)
 
