@@ -1,3 +1,57 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import shutil
+
+def _pick_writable_dir(env_key: str, default1: str, default2: str) -> Path:
+    candidates = []
+    env = os.getenv(env_key)
+    if env:
+        candidates.append(Path(env))
+    candidates.append(Path(default1))
+    candidates.append(Path(default2))
+    for p in candidates:
+        try:
+            p.mkdir(parents=True, exist_ok=True)
+            t = p / ".write_test"
+            t.write_text("ok", encoding="utf-8")
+            t.unlink(missing_ok=True)
+            return p
+        except Exception:
+            continue
+    p = Path("/tmp/spellcaster_fallback")
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+
+
+from pathlib import Path
+import os
+
+def _pick_writable_lib_dir():
+    for p in [
+        Path(os.getenv("LIB_DIR", "")),
+        Path("/data/spellcaster_library"),
+        Path("/tmp/spellcaster_library"),
+    ]:
+        try:
+            if not str(p):
+                continue
+            p.mkdir(parents=True, exist_ok=True)
+            test = p / ".ok"
+            test.write_text("ok")
+            test.unlink()
+            return p
+        except:
+            continue
+    p = Path("/tmp/spellcaster_library")
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+LIB_DIR = _pick_writable_lib_dir()
+
 #!/usr/bin/env python3
 """
 Spellcaster Web Portal — Cohen Edition (with login)
@@ -13,8 +67,8 @@ Features:
 - Login / password wall to protect the whole portal
 """
 
-from __future__ import annotations
 import os, re, sqlite3, unicodedata
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -51,7 +105,7 @@ PASSWORD = os.getenv("PORTAL_PASS", "fast5man!@")  # set PORTAL_PASS on Render
 # We want BASE_DIR to be ~/sentinel (one level up).
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-LIB_DIR = Path(os.getenv("LIB_DIR", "/tmp/spellcaster_library"))
+LIB_DIR = _pick_writable_dir("LIB_DIR", "/data/spellcaster_library", "/tmp/spellcaster_library")
 DB_PATH = Path(os.getenv("DB_PATH", "/tmp/spellcaster.db"))
 LIB_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -447,6 +501,18 @@ def rel_to_abs(rel_path: str) -> Path:
 
 # ---- Web App --------------------------------------------------------------
 app = Flask(__name__)
+
+# -----------------------------
+# Background job helper (eventlet-friendly)
+def _spawn_bg(fn, *args, **kwargs):
+    try:
+        import eventlet
+        eventlet.spawn_n(fn, *args, **kwargs)
+    except Exception:
+        import threading
+        threading.Thread(target=fn, args=args, kwargs=kwargs, daemon=True).start()
+
+
 # Session config
 app.secret_key = os.getenv("SECRET_KEY", "change-this-secret-if-you-like-123")
 # Upload limit (bytes)
@@ -1048,7 +1114,7 @@ def api_reindex():
 # Resumable (chunked) uploads
 # -----------------------------
 
-UPLOADS_DIR = Path(os.getenv("UPLOADS_DIR", "/tmp/spellcaster_uploads"))
+UPLOADS_DIR = _pick_writable_dir("UPLOADS_DIR", "/data/spellcaster_uploads", "/tmp/spellcaster_uploads")
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 def _upload_state_path(upload_id: str) -> Path:
@@ -1189,10 +1255,101 @@ def api_upload_complete(upload_id: str):
     except Exception:
         pass
 
-    # Index incrementally (fast)
-    idx_result = index_single_pdf(dest)
+    # Index incrementally (fast). For non-PDFs, we fall back to marking for reindex.
+    idx_result = {"ok": True, "note": "index scheduled"}
+    def _do_index():
+        try:
+            if dest.suffix.lower() == ".pdf":
+                index_single_pdf(dest)
+            else:
+                # Non-PDF uploads are stored, but incremental indexing is PDF-optimized.
+                # Run a full reindex from the UI if you need these searchable.
+                pass
+        except Exception:
+            # Don't block uploads if indexing fails.
+            pass
+    _spawn_bg(_do_index)
 
     return jsonify({"ok": True, "saved_to": str(dest), "index": idx_result})
+
+
+
+
+# ---------------------------------------------------------------------------
+# Library ingest (scan folders under a staging dir and move into LIB_DIR)
+INGEST_STATE = {
+    "running": False,
+    "scanned": 0,
+    "moved": 0,
+    "skipped": 0,
+    "errors": 0,
+    "last": "",
+    "error": None,
+}
+
+def _is_ingestable(path: Path) -> bool:
+    return path.suffix.lower() in {".pdf", ".txt", ".md", ".rtf", ".epub"}
+
+def _safe_relpath2(p: Path) -> Path:
+    parts = [x for x in p.parts if x not in ("", ".", "..", "/", "\\")]
+    return Path(*parts)
+
+def _ingest_worker(source_dir: Path):
+    INGEST_STATE.update({"running": True, "scanned": 0, "moved": 0, "skipped": 0, "errors": 0, "last": "", "error": None})
+    try:
+        source_dir = Path(source_dir).resolve()
+        if not source_dir.exists():
+            raise RuntimeError(f"Source folder not found: {source_dir}")
+
+        for src in source_dir.rglob("*"):
+            if not src.is_file():
+                continue
+            INGEST_STATE["scanned"] += 1
+            if not _is_ingestable(src):
+                INGEST_STATE["skipped"] += 1
+                continue
+
+            rel = _safe_relpath2(src.relative_to(source_dir))
+            dest = (LIB_DIR / rel)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+
+            # Skip if same size already exists
+            if dest.exists() and dest.stat().st_size == src.stat().st_size:
+                INGEST_STATE["skipped"] += 1
+                continue
+
+            INGEST_STATE["last"] = f"Moving: {rel.as_posix()}"
+            shutil.move(str(src), str(dest))
+            INGEST_STATE["moved"] += 1
+
+            # Schedule incremental indexing for PDFs (non-blocking)
+            if dest.suffix.lower() == ".pdf":
+                def _do_index_one(p=dest):
+                    try:
+                        index_single_pdf(p)
+                    except Exception:
+                        pass
+                _spawn_bg(_do_index_one)
+
+        INGEST_STATE["last"] = "Done."
+    except Exception as e:
+        INGEST_STATE["error"] = f"{e}"
+        INGEST_STATE["errors"] += 1
+    finally:
+        INGEST_STATE["running"] = False
+
+@app.post("/api/library/ingest")
+def api_library_ingest():
+    data = request.get_json(silent=True) or {}
+    source_dir = (data.get("source_dir") or "").strip() or str(Path("/tmp/spellcaster_upload_staging"))
+    if INGEST_STATE.get("running"):
+        return jsonify({"ok": False, "error": "ingest_already_running"}), 409
+    _spawn_bg(_ingest_worker, Path(source_dir))
+    return jsonify({"ok": True, "status": "started", "source_dir": source_dir, "lib_dir": str(LIB_DIR)})
+
+@app.get("/api/library/ingest_status")
+def api_library_ingest_status():
+    return jsonify({"ok": True, **INGEST_STATE, "lib_dir": str(LIB_DIR)})
 
 
 @app.route("/assets/<path:filename>")
@@ -2429,6 +2586,11 @@ if __name__ == "__main__":
 
 
 
+
+@app.route("/uploads")
+def uploads_alias_page():
+    return render_template("uploads.html")
+
 @app.route("/upload", methods=["GET", "POST"])
 @login_required
 def upload():
@@ -2466,3 +2628,123 @@ def upload():
                 message = f"Uploaded to {dest.name}. Reindex complete: +{summary['inserted']} new, {summary['updated']} updated."
     return render_template("upload.html", message=message)
 
+
+
+# ---------------------------------------------------------------------------
+# Google Drive folder sync + Library downloads
+# ---------------------------------------------------------------------------
+
+def _extract_gdrive_folder_id(url: str) -> Optional[str]:
+    """Extract folder id from common Google Drive folder URLs."""
+    if not url:
+        return None
+    url = url.strip()
+    m = re.search(r"/folders/([a-zA-Z0-9_-]+)", url)
+    if m:
+        return m.group(1)
+    m = re.search(r"[?&]id=([a-zA-Z0-9_-]+)", url)
+    if m:
+        return m.group(1)
+    if re.fullmatch(r"[a-zA-Z0-9_-]{10,}", url):
+        return url
+    return None
+
+@app.post("/api/gdrive/sync")
+@login_required
+def api_gdrive_sync():
+    """Download a PUBLIC Google Drive folder into LIB_DIR using gdown.
+
+    JSON body:
+      - folder_url: Google Drive folder URL (required)
+      - subdir: optional relative destination under LIB_DIR (default: '')
+      - overwrite: bool (default false)
+    """
+    data = request.get_json(silent=True) or {}
+    folder_url = (data.get("folder_url") or "").strip()
+    subdir = _safe_relpath(data.get("subdir") or "")
+    folder_id = _extract_gdrive_folder_id(folder_url)
+    if not folder_id:
+        return jsonify({"ok": False, "error": "invalid_folder_url"}), 400
+
+    dest = (LIB_DIR / subdir) if subdir else LIB_DIR
+    dest.mkdir(parents=True, exist_ok=True)
+
+    try:
+        import gdown  # type: ignore
+    except Exception as e:
+        return jsonify({"ok": False, "error": "gdown_not_installed", "detail": str(e)}), 500
+
+    canonical_url = f"https://drive.google.com/drive/folders/{folder_id}"
+
+    before = {p.relative_to(dest).as_posix(): p.stat().st_size for p in dest.rglob("*") if p.is_file()}
+    try:
+        gdown.download_folder(url=canonical_url, output=str(dest), quiet=True, use_cookies=False, remaining_ok=True)
+    except Exception as e:
+        return jsonify({"ok": False, "error": "download_failed", "detail": str(e)}), 500
+
+    after = {p.relative_to(dest).as_posix(): p.stat().st_size for p in dest.rglob("*") if p.is_file()}
+
+    downloaded = sum(1 for k in after.keys() if k not in before)
+    skipped = sum(1 for k in after.keys() if k in before)
+    return jsonify({
+        "ok": True,
+        "folder_id": folder_id,
+        "dest": str(dest),
+        "downloaded": downloaded,
+        "skipped": skipped,
+        "errors": 0,
+        "files_total": len(after),
+    })
+
+@app.get("/library_manifest")
+@login_required
+def library_manifest():
+    """Return a JSON manifest of the current library folder."""
+    items = []
+    for p in sorted([x for x in LIB_DIR.rglob("*") if x.is_file()]):
+        try:
+            st = p.stat()
+            items.append({
+                "path": p.relative_to(LIB_DIR).as_posix(),
+                "size": st.st_size,
+                "mtime": datetime.utcfromtimestamp(st.st_mtime).isoformat(timespec="seconds") + "Z",
+            })
+        except Exception:
+            continue
+    return jsonify({
+        "ok": True,
+        "library_dir": str(LIB_DIR),
+        "count": len(items),
+        "files": items,
+    })
+
+def _make_library_zip(zip_path: Path) -> int:
+    """Create a zip of the library folder. Returns number of files added."""
+    count = 0
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for p in LIB_DIR.rglob("*"):
+            if p.is_file():
+                arc = p.relative_to(LIB_DIR).as_posix()
+                zf.write(p, arcname=arc)
+                count += 1
+    return count
+
+@app.get("/download_library.zip")
+@login_required
+def download_library_zip():
+    """Download the entire library folder as a zip (built on demand)."""
+    from flask import send_file
+    tmp = Path(os.getenv("TMPDIR", "/tmp"))
+    tmp.mkdir(parents=True, exist_ok=True)
+    zip_path = tmp / "spellcaster_library.zip"
+
+    rebuild = True
+    if zip_path.exists():
+        age = (datetime.utcnow().timestamp() - zip_path.stat().st_mtime)
+        if age < 600:
+            rebuild = False
+
+    if rebuild:
+        _make_library_zip(zip_path)
+
+    return send_file(zip_path, as_attachment=True, download_name="spellcaster_library.zip")

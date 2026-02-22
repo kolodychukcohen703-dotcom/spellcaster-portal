@@ -1,0 +1,1 @@
+This build replaces templates/upload.html with a new Uploads UI that supports:\n- server folder ingest (scan subfolders, one file at a time)\n- wait 15/30/60s then reindex\n- reindex status at /reindex_status\n
